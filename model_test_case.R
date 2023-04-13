@@ -19,6 +19,8 @@ library(tidyverse)
 library(furrr)
 library(scene)
 library(openxlsx)
+library(wesanderson)
+library(extrafont)
 
 # directories ------------------------------------------------------------------
 drat::addRepo("malaria", "file:///f:/drat")
@@ -71,11 +73,11 @@ plot_interventions_combined(
 baseline<- copy(site)
 intvn <- copy(site)
 
-# modify vaccine coverage -------------------------
+# modify vaccine coverage ------------------------------------------------------
 terminal_year<- 2050 # year you would like to expand intervention coverage out to 
 # we would like to run model out to 2100, but do not have population projections for 2050-2100 yet
 
-rtss_change<- T   # do you want to modify RTSS?
+rtss_change<- T   # do you want to modify RTSS coverage?
 rtss_target<- 0.8 # target for RTSS
 rtss_year<-  2023    # year for target
 
@@ -143,10 +145,10 @@ plot_interventions_combined(
 # prep site data for model launch ----------------------------------------------
 prep_inputs<- function(site_data, mort_dt, death_rate_matrix){
   
-  #' Prep inputs for batch launch for GAVI runs
+  #' Prep inputs for batch launch for central burden estimate GAVI runs
   #'
   #' @param site_data dataset with site files for country
-  #' @param mort_dt   
+  #' @param mort_dt   dataset with mortality inputs
   #' output: list with site name, urban/rural grouping, iso code, and parameters to pass into cluster
   
   
@@ -170,7 +172,7 @@ prep_inputs<- function(site_data, mort_dt, death_rate_matrix){
       demography = site$demography,
       vectors = site$vectors,
       seasonality = site$seasonality,
-      min_ages = c(0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95) *365,
+      #min_ages = c(0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95) *365,
       eir= site$eir$eir[1],
       overrides = list(human_population= 10000) # what size population is appropriate?
     )
@@ -190,15 +192,53 @@ prep_inputs<- function(site_data, mort_dt, death_rate_matrix){
   output<- lapply(c(1:jobs), prep_site_data)
 }
 
+# prepare inputs for stochastic model runs ----------------------------------------------------
+prep_stochastic_inputs<- function(site, draws){
+  
+  #' Pull stochastic parameters and calibrates for stochastic model runs
+  #'
+  #' @param site_data List created by prep_inputs. 
+  #'                  List contains site name, urban/rural grouping, iso code, and parameters to pass into cluster
+  #' @param draws     The number of stochastic parameter draws you would like to pull   
+  #' output: list with site name, urban/rural grouping, iso code, and additional 'stoch_draws'
+  #'         list with stochastic draws equal to the number of draws requested.
+  
+  format_stochastic_inputs<- function(x){
+    
+    message(paste0('pulling inputs for draw number ', x))
+    
+    param_draw<- site$param_list |>
+      set_parameter_draw(x) |>
+      set_equilibrium(init_EIR= 5) # appropriate init_EIR? Probably changes depending on the site
+    
+    stoch_inputs<- list('param_list'= param_draw,
+                        'site_name' = site$site_name,
+                        'ur' = site$ur,
+                        'iso' = site$iso,
+                        'stochastic_draw_number' = x)
+    
+    return(stoch_inputs)
+  }
+  
+  output<- lapply(1:draws, format_stochastic_inputs)
+  
+  return(output)
+}
 
+# prep central burden estimate inputs
 bl<- prep_inputs(baseline, mort_dt= mort, death_rate_matrix= mort_mat)
-
 int<- prep_inputs(intvn, mort_dt= mort, death_rate_matrix= mort_mat)
+
+# prep stochastic burden estimate inputs
+int_stochastic<- lapply(int, pull_stochastic_parameters, draws= 50)
+bl_stochastic<- lapply(bl, pull_stochastic_parameters, draws= 50)
 
 
 # submit jobs to cluster  ------------------------------------------------------
-message(paste0('submitting ', length(bl),  ' jobs'))
-message(paste0('submitting ', length(int),  ' jobs'))
+message(paste0('submitting ', length(bl),  ' central burden jobs'))
+message(paste0('submitting ', length(int),  ' central burden jobs'))
+
+
 
 # load packages you will need to run malariasimulation package  ----------------
 packages<- c('dplyr', 'tidyr', 'data.table', 'malariasimulation')
@@ -215,26 +255,38 @@ ctx <- context::context_save('pkgs',
 # load context into queue
 obj <- didehpc::queue_didehpc(ctx)
 
-# run baseline jobs
-fold<- paste0(malaria_dir, '/VIMC/baseline/') # folder you would like to save outputs in
-dir.create(fold)
-grp1 <- obj$lapply(bl, run_malaria_model, folder= fold)
+# run central burden baseline jobs ---------------------------------------------
+central_fold<- paste0(malaria_dir, '/VIMC/central_estimates/baseline/') # folder you would like to save outputs in
+stochastic_fold<-  paste0(malaria_dir, '/VIMC/stochastic_estimates/baseline/')
 
-# run intervention jobs
-fold<- paste0(malaria_dir, '/VIMC/intervention/') # folder you would like to save outputs in
-dir.create(fold)
-grp2 <- obj$lapply(int, run_malaria_model, folder= fold)
+central_baseline_jobs <- obj$lapply(bl, 
+                                    run_malaria_model, 
+                                    folder= central_fold)
 
-lapply(bl, run_malaria_model, folder= fold)
+stochastic_baseline_jobs<- obj$lapply(bl_stochastic, 
+                                      run_malaria_model, 
+                                      folder= stochastic_fold)
+
+# run central burden  intervention jobs ----------------------------------------
+central_fold<- paste0(malaria_dir, '/VIMC/central_estimates/intervention/') # folder you would like to save outputs in
+stochastic_fold<-  paste0(malaria_dir, '/VIMC/stochastic_estimates/intervention/')
+
+central_baseline_jobs <- obj$lapply(int, 
+                                    run_malaria_model, 
+                                    folder= central_fold)
+
+stochastic_baseline_jobs<- obj$lapply(int_stochastic, 
+                                      run_malaria_model, 
+                                      folder= stochastic_fold)
 
 
-# load in files  ------------------------------------------
-dir<- paste0(malaria_dir, '/VIMC/baseline/') #directory where outputs are
+# load in files  ---------------------------------------------------------------
+dir<- paste0(malaria_dir, '/VIMC/central_estimates/baseline/') #directory where outputs are
 files<- list.files(dir, full.names = T)
 bl<- rbindlist(lapply(files, readRDS), fill= T)
 
 
-dir<- paste0(malaria_dir, '/VIMC/intervention/') #directory where outputs are
+dir<- paste0(malaria_dir, '/VIMC/central_estimates/intervention/') #directory where outputs are
 files<- list.files(dir, full.names = T)
 intvn<- rbindlist(lapply(files, readRDS), fill= T)#
 
@@ -305,8 +357,8 @@ aggregate_outputs<- function(dt, interval){
   
 }
 
-intvn<-aggregate_outputs(intvn, interval= 30)
-bl<-aggregate_outputs(bl, interval= 30)
+intvn<-aggregate_outputs(intvn, interval= 365)
+bl<-aggregate_outputs(bl, interval= 365)
 
 
 # calculate deaths -------------------------------------------------------------
@@ -367,7 +419,8 @@ calculate_ylds_dalys<- function(dt,
                                 moderate_dw= 0.051, 
                                 severe_dw= 0.133,
                                 clin_episode_length= 0.01375,
-                                severe_episode_length= 0.04795){
+                                severe_episode_length= 0.04795,
+                                interval= 365){
   
   #' Calculate Years Lived with Disability (YLDs) and Disability-Adjusted Life-Years
   #' based on disability weights from the Global Burden of Disease study.
@@ -387,6 +440,7 @@ calculate_ylds_dalys<- function(dt,
   #' @param severe_dw             disability weight for severe malaria
   #' @param clin_episode_length   length of an episode of clinical malaria
   #' @param severe_episode_length length of an episode of severe malaria 
+  #' @param interval              period of time you are calculating YLDs for. This determines disease episode length.
   #' 
   #' Output: data table with columns 'ylds' and 'dalys'
   
@@ -396,12 +450,12 @@ calculate_ylds_dalys<- function(dt,
   
   # calculate YLDs  ---
   dt[ age_years_end < 5, 
-      yld:= severe * severe_dw * severe_episode_length + 
-        clinical * moderate_dw * clin_episode_length]
+      yld:= severe * severe_dw * severe_episode_length * interval + 
+        clinical * moderate_dw * clin_episode_length * interval]
   
   dt[ age_years_end >= 5, 
-      yld:= severe * severe_dw * severe_episode_length + 
-        clinical * mild_dw * clin_episode_length]
+      yld:= severe * severe_dw * severe_episode_length * interval + 
+        clinical * mild_dw * clin_episode_length * interval]
   
   # calculate DALYs ---
   dt<- dt |>
@@ -455,42 +509,80 @@ calculate_cases_deaths_averted<- function(intvn_dt, bl_dt){
   return(output)
   
 }
-# summarize
-# dt |> 
-#  group_by(age_years_start) |> 
-#  summarise(yll= sum(yll),
-#            yld= sum(yld),
-#            daly= sum(daly))
-#
+
+
+reformat_vimc_outputs<- function(dt){
+  #' Reformat outputs for submission to VIMC
+  #' @param dt data table you would like to reformat
+  
+  dt<- dt |>
+    mutate(disease = 'Malaria',
+           country_name = 'Request for Proposal',
+           country = 'RFP') |>
+    rename(cohort_size = population,
+           cases = clinical,
+           dalys = daly,
+           age = age_years_start,
+           year = time) |>
+    select(disease, year, age, country, country_name, cohort_size, cases, dalys, deaths)
+  
+  return(dt)
+}
+
+
+intvn<- reformat_vimc_outputs(intvn)
+bl<- reformat_vimc_outputs(bl)
+
+
+# save output file to submission folder
+write.csv(intvn, paste0(malaria_dir, '/VIMC/output/central_burden_estimates/central_burden_vaccine.csv'))
+write.csv(bl, paste0(malaria_dir, '/VIMC/output/central_burden_estimates/central_burden_baseline.csv'))
+
 
 # plot outputs over time  ------------------------------------------------------
+intvn<- intvn |> mutate( scenario = 'intervention')
+bl<- bl |> mutate(scenario = 'baseline')
+
 output<- rbind(intvn, bl, fill= T)
 
-# clinical cases
-ggplot(data= output, mapping = aes(x= time, y= clinical, color= run, fill= run))+
-  geom_smooth(alpha= 0.2)  +
-  facet_wrap(~age_years_start) +
-  labs(x= 'Time (in months)', y= 'Clinical cases (by months)', main= 'Clinical cases over time') +
-  theme_minimal()
+#font_import()
+#loadfonts(device = 'win')
 
-# severe cases
-ggplot(data= output, mapping = aes(x= time, y= severe, color= run, fill= run))+
+# clinical cases  --------------------------------------------------------------
+ggplot(data= output, mapping = aes(x= year, y= cases, color= scenario, fill= scenario))+
   geom_smooth(alpha= 0.2)  +
-  facet_wrap(~age_years_start) +
-  labs(x= 'Time (in months)', y= 'Severe cases (by months)', main= 'Severe cases over time') +
-  theme_minimal()
+  #geom_point() +
+  facet_wrap(~age) +
+  labs(x= 'Time (in years)', y= 'Clinical cases', title= 'Clinical cases over time',
+       color= 'Scenario', fill= 'Scenario') +
+  theme_minimal()+
+  theme(text= element_text(family= 'Calibri')) +
+  scale_color_manual(values= wes_palette('Royal2', n= 2)) +
+  scale_fill_manual(values= wes_palette('Royal2', n= 2)) 
+  
+# deaths  ----------------------------------------------------------------------
+ggplot(data= output, mapping = aes(x= year, y= deaths, color= scenario, fill= scenario))+
+  geom_smooth(alpha= 0.2)  +
+  #geom_point() +
+  facet_wrap(~age) +
+  labs(x= 'Time (in years)', y= 'Deaths', title= 'Deaths over time',
+       color= 'Scenario', fill= 'Scenario') +
+  theme_minimal()+
+  theme(text= element_text(family= 'Calibri')) +
+  scale_color_manual(values= wes_palette('Royal2', n= 2)) +
+  scale_fill_manual(values= wes_palette('Royal2', n= 2)) 
 
-# deaths
-ggplot(data= output, mapping = aes(x= time, y= deaths, color= run, fill= run))+
-  geom_smooth(alpha= 0.2)  +
-  facet_wrap(~age_years_start) +
-  labs(x= 'Time (in months)', y= 'Deaths (by months)', main= 'Deaths over time') +
-  theme_minimal()
 
-# dalys
-ggplot(data= output, mapping = aes(x= time, y= daly, color= run, fill= run))+
+# DALYs ------------------------------------------------------------------------
+ggplot(data= output, mapping = aes(x= year, y= dalys, color= scenario, fill= scenario))+
   geom_smooth(alpha= 0.2)  +
-  facet_wrap(~age_years_start) +
-  labs(x= 'Time (in months)', y= 'DALYs (by months)', main= 'DALYs over time') +
-  theme_minimal()
+  #geom_point() +
+  facet_wrap(~age) +
+  labs(x= 'Time (in years)', y= 'DALYs', title= 'DALYs over time',
+       color= 'Scenario', fill= 'Scenario') +
+  theme_minimal()+
+  theme(text= element_text(family= 'Calibri')) +
+  scale_color_manual(values= wes_palette('Royal2', n= 2)) +
+  scale_fill_manual(values= wes_palette('Royal2', n= 2)) 
+
 
