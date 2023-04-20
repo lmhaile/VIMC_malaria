@@ -21,12 +21,16 @@ library(scene)
 library(openxlsx)
 library(wesanderson)
 library(extrafont)
-
+library(malariasimulation)
+source("Q:/VIMC_malaria/VIMC_functions.R", echo=TRUE)
 # directories ------------------------------------------------------------------
 drat::addRepo("malaria", "file:///f:/drat")
 code_dir<- 'Q:/VIMC_malaria/' #  directory where code is stored
-malaria_dir<- 'F:/Lydia/VIMC'      #  project directory where files are stored
+malaria_dir<- 'Q:/VIMC_files'      #  project directory where files are stored
 setwd('Q:/')
+setwd('Q:/')
+options(didehpc.cluster = "fi--didemrchnb", didehpc.username = "lhaile")
+didehpc::didehpc_config()
 
 # load in inputs from VIMC  ----------------------------------------------------
 pop<- read.csv(paste0(malaria_dir, '/inputs/202212rfp-1_dds-202208_int_pop_both.csv'))
@@ -36,8 +40,7 @@ mort<- read.csv(paste0(malaria_dir, '/inputs/mortality.csv'))
 # fert<- read.csv(paste0(code_dir, '/inputs/fertility.csv'))
 
 # pull site data  --------------------------------------------------------------
-mli<- foresite::MLI
-site<- site::single_site(mli, 4)
+site<- foresite::MLI
 
 # format mortality data
 mort<- mort[, c('age_to', 'year', 'value')]
@@ -115,7 +118,7 @@ int<- prep_inputs(intvn,
                   death_rate_matrix= mort_mat)
 
 # prep stochastic burden estimate inputs
-int_stochastic<- lapply(int, prep_stochastic_inputs, draws= 50)
+int_stochastic<- lapply(int, prep_stochastic_inputs, draws= 10)
 bl_stochastic<- lapply(bl, prep_stochastic_inputs, draws= 50)
 
 
@@ -133,11 +136,12 @@ src <- conan::conan_sources("github::mrc-ide/malariasimulation")
 ctx <- context::context_save('pkgs', 
                              packages = packages, 
                              package_sources = src,
-                             sources = 'Q:/VIMC/run_malaria_model.R')
+                             sources = 'Q:/model_onboarding/run_malaria_model.R')
 
 
 # load context into queue
 obj <- didehpc::queue_didehpc(ctx)
+didehpc::web_login()
 
 # run central burden baseline jobs ---------------------------------------------
 central_fold<- paste0(malaria_dir, 
@@ -149,36 +153,38 @@ central_baseline_jobs <- obj$lapply(bl,
                                     run_malaria_model, 
                                     folder= central_fold)
 
-stochastic_baseline_jobs<- obj$lapply(bl_stochastic, 
-                                      run_malaria_model, 
-                                      folder= stochastic_fold)
+# stochastic_baseline_jobs<- obj$lapply(bl_stochastic, 
+                                      # run_malaria_model, 
+                                      # folder= stochastic_fold)
+
+
 
 # run central burden  intervention jobs ----------------------------------------
 central_fold<- paste0(malaria_dir, 
-                      '/VIMC/central_estimates/intervention/') # folder you would like to save outputs in
+                      '/central_estimates/intervention/') # folder you would like to save outputs in
 stochastic_fold<-  paste0(malaria_dir, 
-                          '/VIMC/stochastic_estimates/intervention/')
+                          '/stochastic_estimates/intervention/')
 
-central_baseline_jobs <- obj$lapply(int, 
+central_intvn_jobs <- obj$lapply(int, 
                                     run_malaria_model, 
                                     folder= central_fold)
 
-stochastic_baseline_jobs<- obj$lapply(int_stochastic, 
-                                      run_malaria_model, 
-                                      folder= stochastic_fold)
+# stochastic_baseline_jobs<- obj$lapply(int_stochastic, 
+                                      # run_malaria_model, 
+                                      # folder= stochastic_fold)
 
 
 # load in files  ---------------------------------------------------------------
 dir<- paste0(malaria_dir, 
-             '/VIMC/central_estimates/baseline/') #directory where outputs are
+             '/central_estimates/baseline/') #directory where outputs are
 files<- list.files(dir, full.names = T)
 bl<- rbindlist(lapply(files, readRDS), fill= T)
 
 
 dir<- paste0(malaria_dir, 
-             '/VIMC/central_estimates/intervention/') #directory where outputs are
+             '/central_estimates/intervention/') #directory where outputs are
 files<- list.files(dir, full.names = T)
-intvn<- rbindlist(lapply(files, readRDS), fill= T)#
+intvn<- rbindlist(lapply(files, readRDS), fill= T)
 
 intvn<- intvn |>
   mutate(run = 'intervention')
@@ -187,8 +193,8 @@ bl<- bl |>
   mutate(run = 'baseline')
 
 # aggregate model outputs  ----------------------------------------
-intvn<-aggregate_outputs(intvn, interval= 365)
-bl<-aggregate_outputs(bl, interval= 365)
+intvn<-aggregate_outputs(intvn, interval= 365, sum_to_country = TRUE)
+bl<-aggregate_outputs(bl, interval= 365, sum_to_country = TRUE)
 
 
 # calculate deaths -------------------------------------------------------------
@@ -207,8 +213,8 @@ bl<- reformat_vimc_outputs(bl)
 
 
 # save output file to submission folder
-write.csv(intvn, paste0(malaria_dir, '/VIMC/output/central_burden_estimates/central_burden_vaccine.csv'))
-write.csv(bl, paste0(malaria_dir, '/VIMC/output/central_burden_estimates/central_burden_baseline.csv'))
+write.csv(intvn, paste0(malaria_dir, '/output/central_burden_estimates/central_burden_vaccine.csv'))
+write.csv(bl, paste0(malaria_dir, '/output/central_burden_estimates/central_burden_baseline.csv'))
 
 
 # plot outputs over time  ------------------------------------------------------
@@ -216,29 +222,29 @@ intvn<- intvn |> mutate( scenario = 'intervention')
 bl<- bl |> mutate(scenario = 'baseline')
 
 output<- rbind(intvn, bl, fill= T)
-#site_name<- unique(output$)
 #font_import()
-#loadfonts(device = 'win')
+loadfonts(device = 'win')
+
 
 # clinical cases  --------------------------------------------------------------
 ggplot(data= output, mapping = aes(x= year, y= cases, color= scenario, fill= scenario))+
   geom_smooth(alpha= 0.2)  +
   facet_wrap(~age) +
-  labs(x= 'Time (in years)', y= 'Clinical cases', title= paste0('Clinical cases over time: ',site_name),
+  labs(x= 'Time (in years)', y= 'Clinical cases', title= paste0('Clinical cases over time: ', unique(output$country)),
        color= 'Scenario', fill= 'Scenario') +
   theme_minimal()+
-  theme(text= element_text(family= 'Calibri')) +
+  theme(text= element_text(family= 'Arial')) +
   scale_color_manual(values= wes_palette('Royal2', n= 2)) +
   scale_fill_manual(values= wes_palette('Royal2', n= 2)) 
   
 # deaths  ----------------------------------------------------------------------
 ggplot(data= output, mapping = aes(x= year, y= deaths, color= scenario, fill= scenario))+
   geom_smooth(alpha= 0.2)  +
-  facet_wrap(~age) +
-  labs(x= 'Time (in years)', y= 'Deaths', title= 'Deaths over time',
+  facet_wrap(~ age) +
+  labs(x= 'Time (in years)', y= 'Deaths', title= paste0('Deaths over time: ', unique(output$country)),
        color= 'Scenario', fill= 'Scenario') +
   theme_minimal()+
-  theme(text= element_text(family= 'Calibri')) +
+  theme(text= element_text(family= 'Arial')) +
   scale_color_manual(values= wes_palette('Royal2', n= 2)) +
   scale_fill_manual(values= wes_palette('Royal2', n= 2)) 
 
@@ -247,10 +253,10 @@ ggplot(data= output, mapping = aes(x= year, y= deaths, color= scenario, fill= sc
 ggplot(data= output, mapping = aes(x= year, y= dalys, color= scenario, fill= scenario))+
   geom_smooth(alpha= 0.2)  +
   facet_wrap(~age) +
-  labs(x= 'Time (in years)', y= 'DALYs', title= 'DALYs over time',
+  labs(x= 'Time (in years)', y= 'DALYs', title= paste0('DALYs over time: ',unique(output$country)),
        color= 'Scenario', fill= 'Scenario') +
   theme_minimal()+
-  theme(text= element_text(family= 'Calibri')) +
+  theme(text= element_text(family= 'Arial')) +
   scale_color_manual(values= wes_palette('Royal2', n= 2)) +
   scale_fill_manual(values= wes_palette('Royal2', n= 2)) 
 

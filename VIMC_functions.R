@@ -86,6 +86,15 @@ prep_inputs<- function(site_data, mort_dt, death_rate_matrix){
       overrides = list(human_population= 10000) # what size population is appropriate?
     )
     
+    year<- 365
+    # Set clinical incidence rendering
+    params$clinical_incidence_rendering_min_ages = c(seq(0, 100, by = 1))*year
+    params$clinical_incidence_rendering_max_ages = c(seq(0, 100, by = 1))*year
+    
+    # Set severe incidence rendering
+    params$severe_incidence_rendering_min_ages = c(seq(1, 100, by = 1))*year
+    params$severe_incidence_rendering_max_ages = c(seq(1, 100, by = 1))*year
+    
     # # set custom demography based on mortality inputs ------------------------
     # params<- set_demography(
     #   params,
@@ -106,7 +115,7 @@ prep_inputs<- function(site_data, mort_dt, death_rate_matrix){
 prep_stochastic_inputs<- function(site, draws){
   
   #' Pull stochastic parameters and calibrates for stochastic model runs
-  #'
+  #'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABIAAAASCAYAAABWzo5XAAAAWElEQVR42mNgGPTAxsZmJsVqQApgmGw1yApwKcQiT7phRBuCzzCSDSHGMKINIeDNmWQlA2IigKJwIssQkHdINgxfmBBtGDEBS3KCxBc7pMQgMYE5c/AXPwAwSX4lV3pTWwAAAABJRU5ErkJggg==
   #' @param site_data List created by prep_inputs. 
   #'                  List contains site name, urban/rural grouping, iso code, and parameters to pass into cluster
   #' @param draws     The number of stochastic parameter draws you would like to pull   
@@ -136,29 +145,42 @@ prep_stochastic_inputs<- function(site, draws){
 }
 
 
-aggregate_outputs<- function(dt, interval){
+aggregate_outputs<- function(dt, interval, sum_to_country){
   
   #' aggregate incident cases based on a pre-determined time interval (expressed in days). 
-  #' sum to the country level.
+  #' aggregated to the country level or site level.
   #' 
-  #' @param dt       raw model output from malariasimulation package
-  #' @param interval time period you would like to calculate incidence over, expressed in days.
-  #' 
-  #' output: data table with summed cases and rates over specified time interval.
+  #' @param dt             raw model output from malariasimulation package
+  #' @param interval       time period you would like to calculate incidence over, expressed in days.
+  #' @param sum_to_country set to TRUE if you would like to sum values up to the country level (based on ISO code).
+  #'                       if set to FALSE, outputs are aggregated to site level.
+  #' output: data table with summed cases and rates over specified time interval and location grouping.
   
   # reformat case outputs to long
   # need clinical cases, severe cases, population, number treated, and number detected
   
   message(paste0('aggregating outputs by time interval: ', interval, ' days'))
+  
+
   dt <- dt |> 
-    select(timestep, iso, run,
-           contains("n_inc_clin"), contains("n_inc_sev"), contains("n_age"), contains('n_treated'), contains('n_detect')) |>  
+    select(timestep, 
+           iso, 
+           site_name,
+           urban_rural,
+           run,
+           contains("n_inc_clin"), 
+           contains("n_inc_sev"), 
+           contains("n_age"), 
+           contains('n_treated'), 
+           contains('n_detect'))
+  
+
+  dt<- dt |>
     pivot_longer(c(contains("n_inc_clin"), contains("n_inc_sev"), contains("n_age")),
                  names_to = "age", 
                  values_to = "value") |>
     mutate(type = ifelse(grepl('n_inc_clinical', age), 'clinical', 'severe')) |>
     mutate(type = ifelse(grepl('n_age', age), 'population', type))|>
-    #mutate(type = ifelse(grepl('n_detect', age), 'detected', type))|>
     mutate(age = gsub('n_inc_clinical_', '', age),
            age = gsub('n_inc_severe_', '', age),
            age = gsub('n_age_', '', age)) |>
@@ -166,21 +188,61 @@ aggregate_outputs<- function(dt, interval){
     separate(age, into = c("age_days_start", "age_days_end"), sep = "_") 
   
   
-  # calculate incidence based on some time interval
+  # transform time interval
   dt <- dt |>
     mutate(time = as.integer(timestep/ interval))
   
   
-  # sum cases based on this interval, also by country
-  dt<- dt |> 
-    group_by(age_days_start, time, iso) |> 
-    mutate(clinical = sum(clinical),
-           severe = sum(severe),
-           n_treated = sum(n_treated),
-           #n_detect= sum(detected),
-           population = round(mean(population))) |>
-    select(-timestep, -n_detect_365_36499, -n_detect_730_3649) |>
-    distinct()
+  # aggregate outputs based on this interval, also by country
+  
+  if(sum_to_country== TRUE){
+    
+    dt<- dt |> 
+      group_by(age_days_start, time, iso) |> 
+      mutate(clinical = sum(clinical),
+             severe = sum(severe),
+             n_treated = sum(n_treated))
+    
+    # population is an average of summed counts over the time interval of interest
+    
+    dt<- dt |>
+      group_by(age_days_start, timestep, iso) |>
+      mutate(population = sum(population)) |>
+      group_by(age_days_start, time, iso) |>
+      mutate(population= round(mean(population)))
+    
+  } else {
+    
+    dt<- dt |> 
+      group_by(age_days_start, time, site_name) |> 
+      mutate(clinical = sum(clinical),
+             severe = sum(severe),
+             n_treated = sum(n_treated))
+    
+    # population is an average of summed counts over the time interval of interest
+    
+    dt<- dt |>
+      group_by(age_days_start, timestep, site_name) |>
+      mutate(population = sum(population)) |>
+      group_by(age_days_start, time, site_name) |>
+      mutate(population= round(mean(population)))
+    
+  }
+    
+    if(sum_to_country== TRUE){
+      
+    dt<- dt |>
+      select(-timestep, -n_detect_365_36499, -n_detect_730_3649, -site_name, -urban_rural) |>
+        distinct()
+      
+    } else {
+      
+      dt<- dt |>
+        select(-timestep, -n_detect_365_36499, -n_detect_730_3649) |>
+        distinct()
+      
+      
+    }
   
   
   
@@ -188,8 +250,7 @@ aggregate_outputs<- function(dt, interval){
   dt<- dt |> 
     mutate(clin_rate = clinical/ population,
            severe_rate = severe/ population)
-  #prevalence= n_detect/ population)
-  
+
   return(dt)
   message('completed aggregation')
   
@@ -302,8 +363,8 @@ reformat_vimc_outputs<- function(dt){
   
   dt<- dt |>
     mutate(disease = 'Malaria',
-           country_name = 'Request for Proposal',
-           country = 'RFP') |>
+           country_name = iso,
+           country = iso) |>
     rename(cohort_size = population,
            cases = clinical,
            dalys = daly,
