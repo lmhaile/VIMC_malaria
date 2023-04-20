@@ -28,9 +28,6 @@ drat::addRepo("malaria", "file:///f:/drat")
 code_dir<- 'Q:/VIMC_malaria/' #  directory where code is stored
 malaria_dir<- 'Q:/VIMC_files'      #  project directory where files are stored
 setwd('Q:/')
-setwd('Q:/')
-options(didehpc.cluster = "fi--didemrchnb", didehpc.username = "lhaile")
-didehpc::didehpc_config()
 
 # load in inputs from VIMC  ----------------------------------------------------
 pop<- read.csv(paste0(malaria_dir, '/inputs/202212rfp-1_dds-202208_int_pop_both.csv'))
