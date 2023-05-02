@@ -5,18 +5,21 @@
 ########################################################################
 
 
-run_malaria_model<- function(output, folder, stochastic_run= F){
+run_malaria_model<- function(output, folder, stochastic_run){
   
   #' Prep inputs (without parameter updates)-- not explicitly passing site_data object in but this should be updated
   #' 
   #' @param output         list with site name, urban/rural grouping, and parameters to pass into cluster
   #'                       generated from prep_inputs function
-  #' @param stochastic_run 
+  #' @param stochastic_run stochastic or central burden estimate run? 
+  #'                       If this is a model run for stochastic burden estimates, adds an identifying column for the draw number corresponding to the posterior MCMC distribution.
   #' output: model outputs for site with provided parameters (saved into pre-specified folder)
   
   # run the model
   message('running the model')
-  model<- malariasimulation::run_simulation(timesteps = output$param_list$timesteps,
+  require(data.table)
+  
+  model<- malariasimulation::run_simulation(timesteps = max(output$param_list$age_group_rendering_max_ages) +1,
                                             parameters = output$param_list) 
   
   model<- data.table(model)
@@ -24,7 +27,11 @@ run_malaria_model<- function(output, folder, stochastic_run= F){
   model[, urban_rural:=output$ur]
   model[, iso:= output$iso]
   
+  if (stochastic_run== T){
   
+ model[, draw:= output$stochastic_draw_number]
+    
+  }
   # save model runs somewhere
   message('saving the model')
   saveRDS(model, file= paste0(folder, 'raw_model_output_', output$site_name, '_', output$ur, '.RDS'))

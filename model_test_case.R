@@ -23,6 +23,7 @@ library(wesanderson)
 library(extrafont)
 library(malariasimulation)
 source("Q:/VIMC_malaria/VIMC_functions.R", echo=TRUE)
+
 # directories ------------------------------------------------------------------
 drat::addRepo("malaria", "file:///f:/drat")
 code_dir<- 'Q:/VIMC_malaria/' #  directory where code is stored
@@ -38,6 +39,7 @@ mort<- read.csv(paste0(malaria_dir, '/inputs/mortality.csv'))
 
 # pull site data  --------------------------------------------------------------
 site<- foresite::MLI
+site<- site::single_site(site, 2)
 
 # format mortality data
 mort<- mort[, c('age_to', 'year', 'value')]
@@ -72,7 +74,7 @@ plot_interventions_combined(
 baseline<- copy(site)
 intvn <- copy(site)
 
-# set vaccine coverage ------------------------------------------------------
+# set vaccine coverage ---------------------------------------------------------
 intvn<- set_vaccine_coverage(intvn, 
                              change= TRUE,
                              terminal_year= 2050, 
@@ -116,8 +118,10 @@ int<- prep_inputs(intvn,
 
 # prep stochastic burden estimate inputs
 int_stochastic<- lapply(int, prep_stochastic_inputs, draws= 10)
-bl_stochastic<- lapply(bl, prep_stochastic_inputs, draws= 50)
+int_stochastic<- flatten(int_stochastic)
 
+bl_stochastic<- lapply(bl, prep_stochastic_inputs, draws= 10)
+bl_stochastic<- flatten(bl_stochastic)
 
 # submit jobs to cluster  ------------------------------------------------------
 message(paste0('submitting ', length(bl),  ' central burden jobs'))
@@ -133,12 +137,12 @@ src <- conan::conan_sources("github::mrc-ide/malariasimulation")
 ctx <- context::context_save('pkgs', 
                              packages = packages, 
                              package_sources = src,
-                             sources = 'Q:/model_onboarding/run_malaria_model.R')
+                             sources = 'Q:/VIMC_malaria/run_malaria_model.R')
 
 
 # load context into queue
 obj <- didehpc::queue_didehpc(ctx)
-didehpc::web_login()
+#didehpc::web_login()
 
 # run central burden baseline jobs ---------------------------------------------
 central_fold<- paste0(malaria_dir, 
@@ -150,11 +154,15 @@ central_baseline_jobs <- obj$lapply(bl,
                                     run_malaria_model, 
                                     folder= central_fold)
 
-# stochastic_baseline_jobs<- obj$lapply(bl_stochastic, 
-                                      # run_malaria_model, 
-                                      # folder= stochastic_fold)
+stochastic_baseline_jobs<- obj$lapply(bl_stochastic, 
+                                      run_malaria_model, 
+                                      folder= stochastic_fold,
+                                      stochastic_run= T)
 
 
+test<- lapply(int, 
+              run_malaria_model, 
+              folder= central_fold)
 
 # run central burden  intervention jobs ----------------------------------------
 central_fold<- paste0(malaria_dir, 
@@ -166,9 +174,9 @@ central_intvn_jobs <- obj$lapply(int,
                                     run_malaria_model, 
                                     folder= central_fold)
 
-# stochastic_baseline_jobs<- obj$lapply(int_stochastic, 
-                                      # run_malaria_model, 
-                                      # folder= stochastic_fold)
+ stochastic_baseline_jobs<- obj$lapply(int_stochastic,  
+                                       run_malaria_model, 
+                                       folder= stochastic_fold)
 
 
 # load in files  ---------------------------------------------------------------
@@ -176,7 +184,7 @@ dir<- paste0(malaria_dir,
              '/central_estimates/baseline/') #directory where outputs are
 files<- list.files(dir, full.names = T)
 bl<- rbindlist(lapply(files, readRDS), fill= T)
-
+fi--dideclusthn!
 
 dir<- paste0(malaria_dir, 
              '/central_estimates/intervention/') #directory where outputs are
@@ -189,7 +197,16 @@ intvn<- intvn |>
 bl<- bl |>
   mutate(run = 'baseline')
 
-# aggregate model outputs  ----------------------------------------
+# drop the burn-in period from the data-set-- start with five years for now
+intvn<- drop_burnin(intvn, burnin= 5*365)
+bl<- drop_burnin(bl, burnin= 5*365)
+
+# transform time into annual outputs
+intvn<- time_transform(x= intvn, time_divisor = 365, baseline_t = 0)
+bl<- time_transform(x= bl, time_divisor = 365, baseline_t = 0)
+
+
+# aggregate model outputs  -----------------------------------------------------
 intvn<-aggregate_outputs(intvn, interval= 365, sum_to_country = TRUE)
 bl<-aggregate_outputs(bl, interval= 365, sum_to_country = TRUE)
 
@@ -221,7 +238,6 @@ bl<- bl |> mutate(scenario = 'baseline')
 output<- rbind(intvn, bl, fill= T)
 #font_import()
 loadfonts(device = 'win')
-
 
 # clinical cases  --------------------------------------------------------------
 ggplot(data= output, mapping = aes(x= year, y= cases, color= scenario, fill= scenario))+

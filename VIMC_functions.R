@@ -4,6 +4,9 @@
 ## purpose  functions used for VIMC malaria model runs
 ######################################################
 
+
+# parameterizing inputs --------------------------------------------------------
+
 set_vaccine_coverage<- function(site, change= TRUE, terminal_year, rtss_target, rtss_year){
   
   #' set vaccine coverage using scene package
@@ -25,19 +28,19 @@ set_vaccine_coverage<- function(site, change= TRUE, terminal_year, rtss_target, 
                          group_var = group_var)
   
   if (change== TRUE){
-  site$interventions <- site$interventions |>
-    set_change_point(sites = site$sites, 
-                     var = "rtss_cov", 
-                     year = rtss_year, 
-                     target = rtss_target)
-  
-  # Linear scale up of coverage
-  # if you would like coverage to scale up to a certain target
-  site$interventions <- site$interventions |>
-    linear_interpolate(vars = c("itn_use", "pmc_cov", "smc_cov", "rtss_cov"), 
-                       group_var = group_var)
-  
-  
+    site$interventions <- site$interventions |>
+      set_change_point(sites = site$sites, 
+                       var = "rtss_cov", 
+                       year = rtss_year, 
+                       target = rtss_target)
+    
+    # Linear scale up of coverage
+    # if you would like coverage to scale up to a certain target
+    site$interventions <- site$interventions |>
+      linear_interpolate(vars = c("itn_use", "pmc_cov", "smc_cov", "rtss_cov"), 
+                         group_var = group_var)
+    
+    
   }
   
   
@@ -81,7 +84,6 @@ prep_inputs<- function(site_data, mort_dt, death_rate_matrix){
       demography = site$demography,
       vectors = site$vectors,
       seasonality = site$seasonality,
-      #min_ages = c(0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95) *365,
       eir= site$eir$eir[1],
       overrides = list(human_population= 10000) # what size population is appropriate?
     )
@@ -89,11 +91,11 @@ prep_inputs<- function(site_data, mort_dt, death_rate_matrix){
     year<- 365
     # Set clinical incidence rendering
     params$clinical_incidence_rendering_min_ages = c(seq(0, 100, by = 1))*year
-    params$clinical_incidence_rendering_max_ages = c(seq(0, 100, by = 1))*year
+    params$clinical_incidence_rendering_max_ages = c(seq(1, 101, by = 1))*year -1
     
     # Set severe incidence rendering
-    params$severe_incidence_rendering_min_ages = c(seq(1, 100, by = 1))*year
-    params$severe_incidence_rendering_max_ages = c(seq(1, 100, by = 1))*year
+    params$severe_incidence_rendering_min_ages = c(seq(0, 100, by = 1))*year
+    params$severe_incidence_rendering_max_ages = c(seq(0, 101, by = 1))*year -1
     
     # # set custom demography based on mortality inputs ------------------------
     # params<- set_demography(
@@ -109,8 +111,6 @@ prep_inputs<- function(site_data, mort_dt, death_rate_matrix){
   }
   output<- lapply(c(1:jobs), prep_site_data)
 }
-
-
 
 prep_stochastic_inputs<- function(site, draws){
   
@@ -145,6 +145,50 @@ prep_stochastic_inputs<- function(site, draws){
 }
 
 
+# transforming inputs ----------------------------------------------------------
+
+#' Create a new time column for aggregation
+#'
+#' @param x Input data.frame
+#' @param time_divisor Aggregation level. Default = 1 (no aggregation).
+#' Setting to 365 would allow annual aggregation, 30 monthly, 7 weekly etc.
+#' @param baseline_t A baseline time to add to the time output
+#'
+#' @export
+time_transform <- function(x, time_divisor = 1, baseline_t = 0){
+  if(max(x$timestep) %% time_divisor != 0){
+    warning("Number of timesteps not divisible exactly by level, group may be unequal")
+  }
+  
+  x <- x |>
+    dplyr::mutate(t = as.integer(ceiling(.data$timestep / time_divisor) + baseline_t)) |>
+    dplyr::select(-"timestep")
+  
+  return(x)
+}
+
+
+#' Remove burn in period from simulation output
+#'
+#' @param x Input data.frame
+#' @param burnin Length of burn in period in days
+#'
+#' @export
+drop_burnin <- function(x, burnin){
+  if(burnin >= max(x$timestep)){
+    stop("burn in period must be < the maximum timestep")
+  }
+  if(burnin < 0){
+    stop("burn in period must be positive")
+  }
+  
+  
+  x <- x[x$timestep > burnin, ]
+  x$timestep <- as.integer(x$timestep - burnin)
+  return(x)
+}
+
+
 aggregate_outputs<- function(dt, interval, sum_to_country){
   
   #' aggregate incident cases based on a pre-determined time interval (expressed in days). 
@@ -159,102 +203,55 @@ aggregate_outputs<- function(dt, interval, sum_to_country){
   # reformat case outputs to long
   # need clinical cases, severe cases, population, number treated, and number detected
   
-  message(paste0('aggregating outputs by time interval: ', interval, ' days'))
+  message('aggregating outputs')
+  require(data.table)
   
-
   dt <- dt |> 
-    select(timestep, 
+    select(t, 
            iso, 
            site_name,
            urban_rural,
            run,
            contains("n_inc_clin"), 
-           contains("n_inc_sev"), 
-           contains("n_age"), 
-           contains('n_treated'), 
-           contains('n_detect'))
+           contains("n_inc_severe"), 
+           contains("n_age")
+           )
   
-
   dt<- dt |>
-    pivot_longer(c(contains("n_inc_clin"), contains("n_inc_sev"), contains("n_age")),
-                 names_to = "age", 
-                 values_to = "value") |>
-    mutate(type = ifelse(grepl('n_inc_clinical', age), 'clinical', 'severe')) |>
-    mutate(type = ifelse(grepl('n_age', age), 'population', type))|>
-    mutate(age = gsub('n_inc_clinical_', '', age),
-           age = gsub('n_inc_severe_', '', age),
-           age = gsub('n_age_', '', age)) |>
-    spread(key= type, value= value) |>
-    separate(age, into = c("age_days_start", "age_days_end"), sep = "_") 
+    tidyr::pivot_longer(
+      cols = -c("t", "iso", "site_name", "urban_rural", "run",)
+    ) |>
+    dplyr::mutate(
+      name = stringr:: str_remove(.data$name, "_inc")
+    ) 
+  
+  dt<- data.table(dt)
+  
+  dt[name %like% "clinical", group:= 'clinical_incidence']
+  dt[name %like% "severe", group:= 'severe_incidence']
+  dt[name %like% "age", group:= 'age']
   
   
-  # transform time interval
-  dt <- dt |>
-    mutate(time = as.integer(timestep/ interval))
-  
-  
-  # aggregate outputs based on this interval, also by country
-  
-  if(sum_to_country== TRUE){
+  dt |>
+    tidyr::separate(
+      col = "name", 
+      into = c(NA, NA, "age_lower", "age_upper"),
+      sep = "_",
+      convert = TRUE
+    ) |>
     
-    dt<- dt |> 
-      group_by(age_days_start, time, iso) |> 
-      mutate(clinical = sum(clinical),
-             severe = sum(severe),
-             n_treated = sum(n_treated))
-    
-    # population is an average of summed counts over the time interval of interest
-    
-    dt<- dt |>
-      group_by(age_days_start, timestep, iso) |>
-      mutate(population = sum(population)) |>
-      group_by(age_days_start, time, iso) |>
-      mutate(population= round(mean(population)))
-    
-  } else {
-    
-    dt<- dt |> 
-      group_by(age_days_start, time, site_name) |> 
-      mutate(clinical = sum(clinical),
-             severe = sum(severe),
-             n_treated = sum(n_treated))
-    
-    # population is an average of summed counts over the time interval of interest
-    
-    dt<- dt |>
-      group_by(age_days_start, timestep, site_name) |>
-      mutate(population = sum(population)) |>
-      group_by(age_days_start, time, site_name) |>
-      mutate(population= round(mean(population)))
-    
-  }
-    
-    if(sum_to_country== TRUE){
-      
-    dt<- dt |>
-      select(-timestep, -n_detect_365_36499, -n_detect_730_3649, -site_name, -urban_rural) |>
-        distinct()
-      
-    } else {
-      
-      dt<- dt |>
-        select(-timestep, -n_detect_365_36499, -n_detect_730_3649) |>
-        distinct()
-      
-      
-    }
-  
-  
-  
-  # calculate rates based on this interval
-  dt<- dt |> 
-    mutate(clin_rate = clinical/ population,
-           severe_rate = severe/ population)
-
+    tidyr::pivot_wider(
+      id_cols = c("t", "iso", "site_name", "urban_rural", "run")
+    )
   return(dt)
+  
   message('completed aggregation')
   
 }
+
+
+
+# calculating outputs ----------------------------------------------------------
 
 
 calculate_deaths_ylls<- function(dt, cfr= 0.215, treatment_scaler= 0.5, lifespan= 63){
@@ -302,7 +299,6 @@ calculate_deaths_ylls<- function(dt, cfr= 0.215, treatment_scaler= 0.5, lifespan
   
   return(dt)
 }
-
 
 calculate_ylds_dalys<- function(dt, 
                                 mild_dw= 0.006, 
@@ -376,7 +372,6 @@ reformat_vimc_outputs<- function(dt){
 }
 
 
-
 calculate_cases_deaths_averted<- function(intvn_dt, bl_dt){
   #' Calculates cases, deaths, and dalys averted between intervention and baseline scenario.
   #' @param intvn_dt               model outputs for intervention scenario
@@ -415,4 +410,28 @@ calculate_cases_deaths_averted<- function(intvn_dt, bl_dt){
   return(output)
   
 }
+
+
+
+
+
+
+#' Extract basic rates from model output
+#'
+#' @param x Input data.frame
+#' @inheritParams prevalence_format
+#' @inheritParams time_transform
+#'
+#' @export
+get_prevalence <- function(x, time_divisor, baseline_t, age_divisor){
+  prevalence <- x |>
+    prevalence_estimate() |>
+    time_transform(time_divisor = time_divisor, baseline_t = baseline_t) |>
+    prevalence_time_aggregate() |>
+    prevalence_format(age_divisor = age_divisor)
+  return(prevalence)
+}
+
+
+
 
