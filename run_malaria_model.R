@@ -19,7 +19,7 @@ run_malaria_model<- function(output, folder, stochastic_run){
   message('running the model')
   require(data.table)
   
-  model<- malariasimulation::run_simulation(timesteps = max(output$param_list$age_group_rendering_max_ages) +1,
+  model<- malariasimulation::run_simulation(timesteps = output$param_list$timesteps,
                                             parameters = output$param_list) 
   
   model<- data.table(model)

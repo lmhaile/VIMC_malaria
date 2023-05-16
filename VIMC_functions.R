@@ -90,12 +90,20 @@ prep_inputs<- function(site_data, mort_dt, death_rate_matrix){
     
     year<- 365
     # Set clinical incidence rendering
-    params$clinical_incidence_rendering_min_ages = c(seq(0, 100, by = 1))*year
-    params$clinical_incidence_rendering_max_ages = c(seq(1, 101, by = 1))*year -1
+    params$clinical_incidence_rendering_min_ages = c(seq(0, 99, by = 1))*year
+    params$clinical_incidence_rendering_max_ages = c(seq(1, 99, by = 1)*year -1, 36500)
     
     # Set severe incidence rendering
-    params$severe_incidence_rendering_min_ages = c(seq(0, 100, by = 1))*year
-    params$severe_incidence_rendering_max_ages = c(seq(0, 101, by = 1))*year -1
+    params$severe_incidence_rendering_min_ages = c(seq(0, 99, by = 1))*year
+    params$severe_incidence_rendering_max_ages = c(seq(1, 99, by = 1)*year -1, 36500)
+    
+    # Set clinical incidence rendering
+    params$clinical_incidence_rendering_min_ages = c(seq(0, 99, by = 1))*year
+    params$clinical_incidence_rendering_max_ages = c(seq(1, 99, by = 1)*year -1, 36500)
+    
+    # Set age group rendering
+    params$age_group_rendering_min_ages = c(seq(0, 99, by = 1))*year
+    params$age_group_rendering_max_ages = c(seq(1, 99, by = 1)*year -1, 36500)
     
     # # set custom demography based on mortality inputs ------------------------
     # params<- set_demography(
@@ -147,15 +155,17 @@ prep_stochastic_inputs<- function(site, draws){
 
 # transforming inputs ----------------------------------------------------------
 
-#' Create a new time column for aggregation
-#'
-#' @param x Input data.frame
-#' @param time_divisor Aggregation level. Default = 1 (no aggregation).
-#' Setting to 365 would allow annual aggregation, 30 monthly, 7 weekly etc.
-#' @param baseline_t A baseline time to add to the time output
-#'
-#' @export
+
 time_transform <- function(x, time_divisor = 1, baseline_t = 0){
+  #' Create a new time column for aggregation
+  #'
+  #' @param x Input data.frame
+  #' @param time_divisor Aggregation level. Default = 1 (no aggregation).
+  #' Setting to 365 would allow annual aggregation, 30 monthly, 7 weekly etc.
+  #' @param baseline_t A baseline time to add to the time output
+  #'
+  #' @export
+  #' 
   if(max(x$timestep) %% time_divisor != 0){
     warning("Number of timesteps not divisible exactly by level, group may be unequal")
   }
@@ -168,13 +178,14 @@ time_transform <- function(x, time_divisor = 1, baseline_t = 0){
 }
 
 
-#' Remove burn in period from simulation output
-#'
-#' @param x Input data.frame
-#' @param burnin Length of burn in period in days
-#'
-#' @export
+
 drop_burnin <- function(x, burnin){
+  #' Remove burn in period from simulation output
+  #'
+  #' @param x Input data.frame
+  #' @param burnin Length of burn in period in days
+  #'
+  #' @export
   if(burnin >= max(x$timestep)){
     stop("burn in period must be < the maximum timestep")
   }
@@ -189,68 +200,109 @@ drop_burnin <- function(x, burnin){
 }
 
 
-aggregate_outputs<- function(dt, interval, sum_to_country){
+aggregate_outputs<- function(dt, interval, folder){
   
   #' aggregate incident cases based on a pre-determined time interval (expressed in days). 
   #' aggregated to the country level or site level.
   #' 
   #' @param dt             raw model output from malariasimulation package
   #' @param interval       time period you would like to calculate incidence over, expressed in days.
-  #' @param sum_to_country set to TRUE if you would like to sum values up to the country level (based on ISO code).
-  #'                       if set to FALSE, outputs are aggregated to site level.
+  #' @param folder         folder to save aggregated output to
+  
   #' output: data table with summed cases and rates over specified time interval and location grouping.
   
   # reformat case outputs to long
   # need clinical cases, severe cases, population, number treated, and number detected
   
-  message('aggregating outputs')
-  require(data.table)
+  site<- unique(dt$site_name)
   
+  message(paste0('aggregating outputs for site', site))
+  
+  require(data.table)
+
   dt <- dt |> 
     select(t, 
+           ft,
            iso, 
            site_name,
            urban_rural,
            run,
-           contains("n_inc_clin"), 
-           contains("n_inc_severe"), 
-           contains("n_age")
+           contains("n_inc_clin"),   # clinical incidence
+           contains("n_inc_severe"), # severe incidence
+           contains("n_age")         # population
            )
   
   dt<- dt |>
     tidyr::pivot_longer(
-      cols = -c("t", "iso", "site_name", "urban_rural", "run",)
+      cols = -c("t", "ft", "iso", "site_name", "urban_rural", "run")
     ) |>
     dplyr::mutate(
       name = stringr:: str_remove(.data$name, "_inc")
     ) 
   
-  dt<- data.table(dt)
   
+  # classify parameters for aggregation
+  dt<- data.table(dt)
   dt[name %like% "clinical", group:= 'clinical_incidence']
   dt[name %like% "severe", group:= 'severe_incidence']
-  dt[name %like% "age", group:= 'age']
+  dt[name %like% "age", group:= 'population']
   
-  
-  dt |>
+
+  dt<- dt |>
     tidyr::separate(
       col = "name", 
       into = c(NA, NA, "age_lower", "age_upper"),
       sep = "_",
       convert = TRUE
-    ) |>
-    
+    ) 
+
+
+# create aggregates
+# for clinical and severe incidence, sum incident cases over time period -------
+# for population, round population over the time period
+  dt<- data.table(dt)
+  
+  grouping<- c('t', 'iso', 'site_name', 'urban_rural', 'run', 'age_lower', 'age_upper', 'group')
+  dt[group== 'clinical_incidence', val:= sum(value), by= grouping]
+  dt[group== 'severe_incidence', val:= sum(value), by= grouping]
+  dt[group== 'population', val:= round(mean(value)), by= grouping]
+  
+dt<- unique(dt, by= grouping)
+  
+ dt<-  dt|>
     tidyr::pivot_wider(
-      id_cols = c("t", "iso", "site_name", "urban_rural", "run")
+      id_cols = c("t", "ft", "iso", "age_lower", "age_upper", "site_name", "urban_rural", "run"),
+      names_from = 'group',
+      values_from = 'val'
     )
-  return(dt)
+
+ #  save output to folder
+  write_rds(dt, file= paste0(folder, 'aggregated_output_', site, '.RDS'))
   
   message('completed aggregation')
   
 }
 
-
-
+aggregate_further<- function(dt){
+  #' aggregate outputs further to the country or site level
+  #' aggregated to the country level or site level.
+  #' 
+  #' @param location if 'iso', aggregate based on ISO code. If 'site_name', aggregate to site level.
+  
+  
+  dt<- data.table(dt)
+  
+  grouping<- c('t', 'iso', location, 'run', 'age_lower', 'age_upper', 'group')
+  
+  dt[clinical_incidence:= sum(clinical_incidence), by= grouping]
+  dt[severe_incidence:= sum(value), by= grouping]
+  dt[population:= sum(population), by= grouping]
+  
+  dt<- unique(dt, by= grouping)
+  
+  message('done aggregating')
+  
+}
 # calculating outputs ----------------------------------------------------------
 
 
@@ -262,7 +314,7 @@ calculate_deaths_ylls<- function(dt, cfr= 0.215, treatment_scaler= 0.5, lifespan
   #' @param dt               malariasimulation model outputs with columns 'severe' for severe incidence and 'n_treated' for number of individuals treated
   #' @param cfr              per GTS method, deaths are calculated using a case fatality ratio (CFR) value that is applied to severe incidence.
   #'                         see World Malaria Report and Wilson et al. for more information.
-  #' @param treatment_scaler we remove a proportion of cases that have received treatment, assuming that 50% of treated cases remit and
+  #' @param scaler we remove a proportion of cases that have received treatment, assuming that 50% of treated cases remit and
   #'                         are no longer susceptible to mortality.
   #' @param lifespan         expected lifespan used to calculate YLLs. 
   #'                         YLLs are calculated by multiplying deaths by the number of years an individual was expected to live past their year of death.
@@ -273,16 +325,12 @@ calculate_deaths_ylls<- function(dt, cfr= 0.215, treatment_scaler= 0.5, lifespan
   
   message('calculating deaths and YLLs')
   
-  # transform age into years
-  dt<- dt|> 
-    mutate(age_days_start= as.numeric(age_days_start),
-           age_days_end= as.numeric(age_days_end))
+  # add mortality rate
+  dt<- dt |>
+    mutate(mortality_rate = scaler * .data$severe_incidence)
   
   dt<- dt |>
-    mutate(age_years_start= as.integer(age_days_start/ 365),
-           age_years_end= as.integer(age_days_end/ 365))
-  dt<- dt |>
-    mutate(deaths =  cfr * severe - (n_treated * treatment_scaler))
+    mutate(deaths =  .data$mortality_rate - (ft * treatment_scaler))
   
   
   dt<- data.table(dt)
@@ -291,9 +339,12 @@ calculate_deaths_ylls<- function(dt, cfr= 0.215, treatment_scaler= 0.5, lifespan
   dt[, deaths:= as.integer(deaths)]
   
   # calculate ylls
+  # transform age to years
+  dt[, age_years_lower:= age_lower / 365]
+  dt[, age_years_upper:= age_upper / 365]
   
   dt <- dt |>
-    mutate(yll= deaths * (lifespan - (age_years_end - age_years_start)/2))  
+    mutate(yll= deaths * (lifespan - (age_years_upper - age_years_lower)/2))  
   
   message('completed calculation of deaths and YLLs')
   
@@ -336,12 +387,12 @@ calculate_ylds_dalys<- function(dt,
   
   # calculate YLDs  ---
   dt[ age_years_end < 5, 
-      yld:= severe * severe_dw * severe_episode_length * interval + 
-        clinical * moderate_dw * clin_episode_length * interval]
+      yld:= severe_incidence * severe_dw * severe_episode_length * interval + 
+        clinical_incidence * moderate_dw * clin_episode_length * interval]
   
   dt[ age_years_end >= 5, 
-      yld:= severe * severe_dw * severe_episode_length * interval + 
-        clinical * mild_dw * clin_episode_length * interval]
+      yld:= severe_incidence * severe_dw * severe_episode_length * interval + 
+        clinical_incidence * mild_dw * clin_episode_length * interval]
   
   # calculate DALYs ---
   dt<- dt |>
@@ -362,10 +413,10 @@ reformat_vimc_outputs<- function(dt){
            country_name = iso,
            country = iso) |>
     rename(cohort_size = population,
-           cases = clinical,
+           cases = clinical_incidence,
            dalys = daly,
            age = age_years_start,
-           year = time) |>
+           year = t) |>
     select(disease, year, age, country, country_name, cohort_size, cases, dalys, deaths)
   
   return(dt)
