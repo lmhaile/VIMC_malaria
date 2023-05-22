@@ -8,7 +8,6 @@ rm(list= ls())
 
 
 # packages  --------------------------------------------------------------------
-
 library(tidyverse)
 library(furrr)
 library(data.table)
@@ -112,11 +111,13 @@ plot_interventions_combined(
 # prep central burden estimate inputs ------------------------------------------
 bl<- prep_inputs(baseline, 
                  mort_dt= mort, 
-                 death_rate_matrix= mort_mat)
+                 death_rate_matrix= mort_mat,
+                 folder= paste0(malaria_dir, '/central_estimates/baseline/'))
 
 int<- prep_inputs(intvn, 
                   mort_dt= mort, 
-                  death_rate_matrix= mort_mat)
+                  death_rate_matrix= mort_mat,
+                  folder= paste0(malaria_dir, '/central_estimates/intervention/'))
 
 
 # prep stochastic burden estimate inputs
@@ -142,7 +143,12 @@ ctx <- context::context_save('pkgs',
                              package_sources = src,
                              sources = 'Q:/VIMC_malaria/run_malaria_model.R')
 
-config <- didehpc::didehpc_config(use_rrq = TRUE)
+config <- didehpc::didehpc_config(
+  use_rrq = FALSE,
+  cores = 1,
+  cluster = "wpia-hn" ,#"fi--dideclusthn", # , "fi--didemrchnb""fi--didemrchnb"
+  template = "AllNodes", ## use for the wpia cluster
+  parallel = FALSE)
 
 # load context into queue
 obj <- didehpc::queue_didehpc(ctx)
@@ -180,7 +186,8 @@ central_intvn_jobs <- obj$lapply(int,
 #stochastic_baseline_jobs<- obj$lapply(int_stochastic,  
 #run_malaria_model, 
 #folder= stochastic_fold)
-test<- lapply(bl, 
+testing<- lapply(test, 
               run_malaria_model, 
-              folder= central_fold)
+              folder= paste0(malaria_dir, 
+                             '/central_estimates/baseline/'))
 

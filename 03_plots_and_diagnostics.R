@@ -7,8 +7,6 @@
 rm(list= ls())
 
 # packages  --------------------------------------------------------------------
-
-library(tidyverse)
 library(furrr)
 library(data.table)
 library(drat)
@@ -16,12 +14,12 @@ library(foresite)
 library(dplyr)
 library(mlgts)
 library(tidyverse)
-library(furrr)
 library(scene)
 library(openxlsx)
 library(wesanderson)
 library(extrafont)
-library(malariasimulation)
+library(ggforce)
+
 source("Q:/VIMC_malaria/VIMC_functions.R", echo=TRUE)
 
 # directories ------------------------------------------------------------------
@@ -39,10 +37,25 @@ output<- rbind(intvn, bl, fill= T)
 #font_import()
 loadfonts(device = 'win')
 
+pdf(paste0(malaria_dir, '/plots/diagnostics.pdf'))
 # clinical cases  --------------------------------------------------------------
 ggplot(data= output, mapping = aes(x= year, y= cases, color= scenario, fill= scenario))+
   geom_smooth(alpha= 0.2)  +
-  facet_wrap(~age) +
+  facet_wrap(~age, scales= 'free') +
+  labs(x= 'Time (in years)', y= 'Clinical cases', title= paste0('Clinical cases over time: ', unique(output$country)),
+       color= 'Scenario', fill= 'Scenario') +
+  theme_minimal()+
+  theme(text= element_text(family= 'Arial')) +
+  scale_color_manual(values= wes_palette('Royal2', n= 2)) +
+  scale_fill_manual(values= wes_palette('Royal2', n= 2)) 
+
+
+ggplot(data= output, mapping = aes(x= year, y= cases, color= scenario, fill= scenario))+
+  geom_smooth(alpha= 0.2)  +
+  facet_wrap_paginate(~age, 
+                      scales = 'free',
+                      nrow= 5,
+                      ncol= 5) +
   labs(x= 'Time (in years)', y= 'Clinical cases', title= paste0('Clinical cases over time: ', unique(output$country)),
        color= 'Scenario', fill= 'Scenario') +
   theme_minimal()+
@@ -73,4 +86,4 @@ ggplot(data= output, mapping = aes(x= year, y= dalys, color= scenario, fill= sce
   scale_color_manual(values= wes_palette('Royal2', n= 2)) +
   scale_fill_manual(values= wes_palette('Royal2', n= 2)) 
 
-
+dev.off()

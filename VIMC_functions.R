@@ -55,12 +55,13 @@ set_vaccine_coverage<- function(site, change= TRUE, terminal_year, rtss_target, 
   return(site)
 }
 
-prep_inputs<- function(site_data, mort_dt, death_rate_matrix){
+prep_inputs<- function(site_data, mort_dt, death_rate_matrix, folder){
   
   #' Prep inputs for batch launch for central burden estimate GAVI runs
   #'
   #' @param site_data dataset with site files for country
   #' @param mort_dt   dataset with mortality inputs
+  #' @param folder    folder to save input parameters
   #' output: list with site name, urban/rural grouping, iso code, and parameters to pass into cluster
   
   
@@ -85,7 +86,7 @@ prep_inputs<- function(site_data, mort_dt, death_rate_matrix){
       vectors = site$vectors,
       seasonality = site$seasonality,
       eir= site$eir$eir[1],
-      overrides = list(human_population= 10000) # what size population is appropriate?
+      overrides = list(human_population= 5000) # what size population is appropriate?
     )
     
     year<- 365
@@ -115,7 +116,10 @@ prep_inputs<- function(site_data, mort_dt, death_rate_matrix){
     # )
     # 
     inputs<- list('param_list'= params, 'site_name'= site_name, 'ur'= ur, 'iso'= iso)
-    return(inputs)
+    
+    write_rds(inputs, paste0(folder, 'input_parameters/', site_name, '_', ur, '_', iso, '.rds'))
+    
+    return(paste0(site_name, '_', ur, '_', iso))
   }
   output<- lapply(c(1:jobs), prep_site_data)
 }
@@ -216,7 +220,7 @@ aggregate_outputs<- function(dt, interval, folder){
   
   site<- unique(dt$site_name)
   
-  message(paste0('aggregating outputs for site', site))
+  message(paste0('aggregating outputs for site ', site))
   
   require(data.table)
 
@@ -256,7 +260,12 @@ aggregate_outputs<- function(dt, interval, folder){
       convert = TRUE
     ) 
 
-
+  dt<- data.table(dt)
+  # transform age to years
+  dt[, age_years_lower:= round(age_lower / 365)]
+  dt[, age_years_upper:= round(age_upper / 365)]
+  
+  
 # create aggregates
 # for clinical and severe incidence, sum incident cases over time period -------
 # for population, round population over the time period
@@ -271,7 +280,7 @@ dt<- unique(dt, by= grouping)
   
  dt<-  dt|>
     tidyr::pivot_wider(
-      id_cols = c("t", "ft", "iso", "age_lower", "age_upper", "site_name", "urban_rural", "run"),
+      id_cols = c("t", "ft", "iso", "age_years_lower", "age_years_upper", "site_name", "urban_rural", "run"),
       names_from = 'group',
       values_from = 'val'
     )
@@ -292,7 +301,7 @@ aggregate_further<- function(dt){
   
   dt<- data.table(dt)
   
-  grouping<- c('t', 'iso', location, 'run', 'age_lower', 'age_upper', 'group')
+  grouping<- c('t', 'iso', location, 'run', 'age_years_lower', 'age_years_upper', 'group')
   
   dt[clinical_incidence:= sum(clinical_incidence), by= grouping]
   dt[severe_incidence:= sum(value), by= grouping]
@@ -306,7 +315,7 @@ aggregate_further<- function(dt){
 # calculating outputs ----------------------------------------------------------
 
 
-calculate_deaths_ylls<- function(dt, cfr= 0.215, treatment_scaler= 0.5, lifespan= 63){
+calculate_deaths_ylls<- function(dt, cfr= 0.215, scaler= 0.5, lifespan= 63){
   
   #' Calculate deaths + years of life lost (YLLs) per GTS method.
   #' Where severe cases= 0, deaths= 0. Additionally remove a proportion of the cases that have received treatment.
@@ -330,7 +339,7 @@ calculate_deaths_ylls<- function(dt, cfr= 0.215, treatment_scaler= 0.5, lifespan
     mutate(mortality_rate = scaler * .data$severe_incidence)
   
   dt<- dt |>
-    mutate(deaths =  .data$mortality_rate - (ft * treatment_scaler))
+    mutate(deaths =  .data$mortality_rate - (ft * scaler))
   
   
   dt<- data.table(dt)
@@ -339,12 +348,8 @@ calculate_deaths_ylls<- function(dt, cfr= 0.215, treatment_scaler= 0.5, lifespan
   dt[, deaths:= as.integer(deaths)]
   
   # calculate ylls
-  # transform age to years
-  dt[, age_years_lower:= age_lower / 365]
-  dt[, age_years_upper:= age_upper / 365]
-  
   dt <- dt |>
-    mutate(yll= deaths * (lifespan - (age_years_upper - age_years_lower)/2))  
+    mutate(yll= round(deaths * (lifespan - (age_years_upper - age_years_lower)/2)))
   
   message('completed calculation of deaths and YLLs')
   
@@ -386,11 +391,11 @@ calculate_ylds_dalys<- function(dt,
   message('calculating YLDs and DALYs')
   
   # calculate YLDs  ---
-  dt[ age_years_end < 5, 
+  dt[ age_years_upper < 5, 
       yld:= severe_incidence * severe_dw * severe_episode_length * interval + 
         clinical_incidence * moderate_dw * clin_episode_length * interval]
   
-  dt[ age_years_end >= 5, 
+  dt[ age_years_upper >= 5, 
       yld:= severe_incidence * severe_dw * severe_episode_length * interval + 
         clinical_incidence * mild_dw * clin_episode_length * interval]
   
@@ -415,8 +420,8 @@ reformat_vimc_outputs<- function(dt){
     rename(cohort_size = population,
            cases = clinical_incidence,
            dalys = daly,
-           age = age_years_start,
-           year = t) |>
+           age = age_years_lower,
+           year = year) |>
     select(disease, year, age, country, country_name, cohort_size, cases, dalys, deaths)
   
   return(dt)
@@ -486,3 +491,171 @@ get_prevalence <- function(x, time_divisor, baseline_t, age_divisor){
 
 
 
+
+#' Extract basic rates from model output
+#'
+#' @param x Input data.frame
+#' @inheritParams rates_format
+#' @inheritParams time_transform
+#' @inheritParams mortality_rate
+#' @inheritParams treatment_scaling
+#' @param aggregate_age Aggregate output over age groups
+#'
+#' @export
+get_rates <- function(x, time_divisor, baseline_t, age_divisor, scaler, treatment_scaler, baseline_treatment, aggregate_age = FALSE){
+  rates <- x |>
+    rates_column_check() |>
+    rates_transform() |>
+    time_transform(time_divisor = time_divisor, baseline_t = baseline_t) |>
+    rates_time_aggregate() |>
+    rates_format(age_divisor = age_divisor) |>
+    treatment_scaling(treatment_scaler = treatment_scaler, baseline_treatment = baseline_treatment) |>
+    mortality_rate(scaler = scaler)
+  
+  if(aggregate_age){
+    rates <- rates |>
+      rates_age_aggregate()
+  }
+  return(rates)
+}
+
+#' Rates input checks
+#'
+#' Checks that the required columns are present and that the age-ranges for
+#' required columns align.
+#'
+#' @param x Input data.frame
+rates_column_check <- function(x){
+  cols <- colnames(x)
+  if(!"timestep" %in% cols){
+    stop("required column `timestep` missing")
+  }
+  if(!"ft" %in% cols){
+    stop("required column `ft` missing")
+  }
+  if(sum(grepl("n_inc_clinical", cols)) == 0){
+    stop("required columns `n_inc_clinical_...` missing")
+  }
+  if(sum(grepl("n_inc_severe", cols)) == 0){
+    stop("required columns `n_inc_severe_...` missing")
+  }
+  if(sum(grepl("n_age_", cols)) == 0){
+    stop("required columns `n_age_...` missing")
+  }
+  clinical_cols <- cols[grepl("n_inc_clinical", cols)]
+  clinical_age_ranges <- stringr::str_split(stringr::str_replace(clinical_cols, "n_inc_clinical_", ""), "_")
+  severe_cols <- cols[grepl("n_inc_severe", cols)]
+  severe_age_ranges <- stringr::str_split(stringr::str_replace(severe_cols, "n_inc_severe_", ""), "_")
+  n_age_cols <- cols[grepl("n_age", cols)]
+  n_age_ranges <- stringr::str_split(stringr::str_replace(n_age_cols, "n_age_", ""), "_")
+  if(!identical(clinical_age_ranges, severe_age_ranges) | !identical(clinical_age_ranges, n_age_ranges)){
+    stop("Age ranges for `n_inc_clinical_...` and `n_inc_severe_...` and `n_age_...` outputs must be the same")
+  }
+  return(x)
+}
+
+#' Transform rates into long form
+#'
+#' @param x Input data.frame
+rates_transform <- function(x){
+  x <- x |>
+    dplyr::select(
+      "timestep",
+      "ft",
+      dplyr::contains("n_age"),
+      dplyr::contains("n_inc_clinical"),
+      dplyr::contains("n_inc_severe"),
+    ) |>
+    tidyr::pivot_longer(
+      cols = -c("timestep", "ft")
+    ) |>
+    dplyr::mutate(
+      name = stringr::str_remove(.data$name, "_inc")
+    ) |>
+    tidyr::separate(
+      col = "name",
+      into = c(NA, "name", "age_lower", "age_upper"),
+      sep = "_",
+      convert = TRUE
+    ) |>
+    tidyr::pivot_wider(
+      id_cols = c("timestep", "age_lower", "age_upper", "ft")
+    )
+  return(x)
+}
+
+#' Aggregate rates output over t
+#'
+#' @param x Input data.frame
+rates_time_aggregate <- function(x){
+  x <- x |>
+    dplyr::summarise(
+      dplyr::across(c("clinical", "severe"), sum),
+      dplyr::across(c("age", "ft"), mean),
+      .by = c("t", "age_lower", "age_upper")
+    )
+  return(x)
+}
+
+
+#' Format rates
+#'
+#' Create rates from counts and specifies age output units
+#'
+#' @param x Input data.frame
+#' @param age_divisor Aggregation level. For example setting to 365 will return
+#' age units in years
+rates_format <- function(x, age_divisor = 365){
+  if(age_divisor < 1){
+    stop("age_divisor must be > 1")
+  }
+  
+  x <- x |>
+    dplyr::mutate(
+      prop_age = .data$age / sum(.data$age),
+      .by = "t"
+    ) |>
+    dplyr::mutate(
+      clinical = .data$clinical / .data$age,
+      severe = .data$severe / .data$age,
+      age_lower = round(.data$age_lower / age_divisor),
+      age_upper = round(.data$age_upper / age_divisor)) |>
+    dplyr::select(-"age")
+  return(x)
+}
+
+#' Aggregate rates output over age
+#'
+#' @param x Input data.frame
+rates_age_aggregate <- function(x){
+  x <- x |>
+    dplyr::summarise(
+      clinical = stats::weighted.mean(.data$clinical, .data$prop_age),
+      severe  = stats::weighted.mean(.data$severe, .data$prop_age),
+      mortality = stats::weighted.mean(.data$mortality, .data$prop_age),
+      .by = "t"
+    )
+  return(x)
+}
+
+#' Adjust severe (and downstream mortality) rates as a result of treatment coverage.
+#'
+#' @param x Input data.frame
+#' @param treatment_scaler The impact of treatment coverage on progression to severe disease and death.
+#' A highly uncertain parameter, the analysis by
+#'  \href{https://www.thelancet.com/journals/laninf/article/PIIS1473-3099(15)00423-5/fulltext}{Griffin et al (2016)}
+#' sampled from a uniform diastribution (0, 1).
+#' @param baseline_treatment The proportion of uncomplicated malaria cases that are effectively treated historically.
+treatment_scaling <- function(x, treatment_scaler, baseline_treatment = 0){
+  if(treatment_scaler > 1 || treatment_scaler < 0){
+    stop("treatment_scaler must be between 0 and 1")
+  }
+  if(baseline_treatment > 1 || baseline_treatment < 0){
+    stop("treatment_scaler must be between 0 and 1")
+  }
+  ts <- (1 - treatment_scaler)
+  x <- x |>
+    dplyr::mutate(severe = .data$severe * ((ts * .data$ft + (1 - .data$ft)) / (ts * baseline_treatment + (1 - baseline_treatment)))) |>
+    dplyr::select(-"ft")
+  return(x)
+}
