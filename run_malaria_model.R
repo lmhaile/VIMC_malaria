@@ -52,14 +52,6 @@ run_malaria_model<- function(identifier, folder, stochastic_run){
   
   # save model runs somewhere
   message('saving the model')
-  saveRDS(model, file= paste0(folder, 'raw_model_output/raw_model_output_', input$site_name, '_', input$ur, '.RDS'))
+  saveRDS(model, file= paste0(folder, 'raw_model_output/raw_model_output_', identifier, '.RDS'))
 }
 
-random_walk <- function(x, n_steps) {
-  ret <- numeric(n_steps)
-  for (i in seq_len(n_steps)) {
-    x <- rnorm(1, x)
-    ret[[i]] <- x
-  }
-  ret
-}

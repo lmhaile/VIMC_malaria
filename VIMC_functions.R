@@ -59,9 +59,10 @@ prep_inputs<- function(site_data, mort_dt, death_rate_matrix, folder){
   
   #' Prep inputs for batch launch for central burden estimate GAVI runs
   #'
-  #' @param site_data dataset with site files for country
-  #' @param mort_dt   dataset with mortality inputs
-  #' @param folder    folder to save input parameters
+  #' @param site_data  dataset with site files for country
+  #' @param mort_dt    dataset with mortality inputs
+  #' @param folder     folder to save input parameters
+  #' @param population population to run the model on
   #' output: list with site name, urban/rural grouping, iso code, and parameters to pass into cluster
   
   
@@ -86,7 +87,7 @@ prep_inputs<- function(site_data, mort_dt, death_rate_matrix, folder){
       vectors = site$vectors,
       seasonality = site$seasonality,
       eir= site$eir$eir[1],
-      overrides = list(human_population= 5000) # what size population is appropriate?
+      overrides = list(human_population= 5000) 
     )
     
     year<- 365
@@ -287,7 +288,7 @@ dt<- unique(dt, by= grouping)
 
  #  save output to folder
   write_rds(dt, file= paste0(folder, 'aggregated_output_', site, '.RDS'))
-  
+  return(dt)
   message('completed aggregation')
   
 }
@@ -619,8 +620,8 @@ rates_format <- function(x, age_divisor = 365){
       clinical = .data$clinical / .data$age,
       severe = .data$severe / .data$age,
       age_lower = round(.data$age_lower / age_divisor),
-      age_upper = round(.data$age_upper / age_divisor)) |>
-    dplyr::select(-"age")
+      age_upper = round(.data$age_upper / age_divisor)) 
+    #dplyr::select(-"age")
   return(x)
 }
 
@@ -657,5 +658,15 @@ treatment_scaling <- function(x, treatment_scaler, baseline_treatment = 0){
   x <- x |>
     dplyr::mutate(severe = .data$severe * ((ts * .data$ft + (1 - .data$ft)) / (ts * baseline_treatment + (1 - baseline_treatment)))) |>
     dplyr::select(-"ft")
+  return(x)
+}
+
+mortality_rate <- function(x, scaler){
+  if(scaler > 1 || scaler < 0){
+    stop("scaler must be between 0 and 1")
+  }
+  
+  x <- x |>
+    dplyr::mutate(mortality = scaler * .data$severe)
   return(x)
 }
