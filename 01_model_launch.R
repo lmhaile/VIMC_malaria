@@ -25,7 +25,6 @@ library(malariasimulation)
 source("Q:/VIMC_malaria/VIMC_functions.R", echo=TRUE)
 
 # directories ------------------------------------------------------------------
-
 drat::addRepo("malaria", "file:///f:/drat")
 code_dir<- 'Q:/VIMC_malaria/' #  directory where code is stored
 malaria_dir<- 'Q:/VIMC_files'      #  project directory where files are stored
@@ -33,14 +32,17 @@ setwd('Q:/')
 
 # load in inputs from VIMC  ----------------------------------------------------
 pop<- read.csv(paste0(malaria_dir, '/inputs/202212rfp-1_dds-202208_int_pop_both.csv'))
+total_pop<- read.csv(paste0(malaria_dir, '/inputs/202212rfp-1_dds-202208_tot_pop_both.csv'))
+
 # le<- read.csv(paste0(malaria_dir, '/inputs/202212rfp-1_dds-202208_life_ex_both.csv'))
 coverage<- read.csv(paste0(malaria_dir, '/inputs/coverage_202212rfp-1_malaria-mal4-default.csv'))
 mort<- read.csv(paste0(malaria_dir, '/inputs/mortality.csv'))
 # fert<- read.csv(paste0(code_dir, '/inputs/fertility.csv'))
 
 # pull site data  --------------------------------------------------------------
-site<- foresite::MLI
-#site<- site::single_site(site, 2)
+site<- foresite::MWI
+site<- site::single_site(site, 54)
+
 
 # format mortality data
 mort<- mort[, c('age_to', 'year', 'value')]
@@ -60,6 +62,12 @@ mort_mat<- mort_mat[,timesteps:= timesteps* 365]
 mort_mat <- mort_mat |>
   select(-timesteps)
 
+
+site$population<- merge(site$population, total_pop[, c('year', 'value')], by = 'year')
+site$population<- site$population |>
+  select(-pop)
+site$population<- site$population |>
+  rename(pop = value)
 
 # plot initial vaccine coverage  -----------------------------------------------
 plot_interventions_combined(
@@ -109,10 +117,11 @@ plot_interventions_combined(
 
 
 # prep central burden estimate inputs ------------------------------------------
+
 bl<- prep_inputs(baseline, 
-                 mort_dt= mort, 
-                 death_rate_matrix= mort_mat,
-                 folder= paste0(malaria_dir, '/central_estimates/baseline/'))
+                    mort_dt= mort, 
+                    death_rate_matrix= mort_mat,
+                    folder= paste0(malaria_dir, '/central_estimates/baseline/'))
 
 int<- prep_inputs(intvn, 
                   mort_dt= mort, 
@@ -143,16 +152,11 @@ ctx <- context::context_save('pkgs',
                              package_sources = src,
                              sources = 'Q:/VIMC_malaria/run_malaria_model.R')
 
-config <- didehpc::didehpc_config(
-  use_rrq = FALSE,
-  cores = 1,
-  cluster = "wpia-hn" ,#"fi--dideclusthn", # , "fi--didemrchnb""fi--didemrchnb"
-  template = "AllNodes", ## use for the wpia cluster
-  parallel = FALSE)
+config <- didehpc::didehpc_config(use_rrq = TRUE)
 
 # load context into queue
 obj <- didehpc::queue_didehpc(ctx)
-#didehpc::web_login()
+didehpc::web_login()
 
 # run central burden baseline jobs ---------------------------------------------
 central_fold<- paste0(malaria_dir, 
@@ -160,11 +164,15 @@ central_fold<- paste0(malaria_dir,
 stochastic_fold<-  paste0(malaria_dir, 
                           '/stochastic_estimates/baseline/')
 
-central_baseline_jobs <- obj$lapply(bl, 
+central_baseline_jobs_5k <- obj$lapply(bl_5k, 
                                     run_malaria_model, 
                                     folder= central_fold,
                                     stochastic_run= FALSE)
 
+central_baseline_jobs_50k <- obj$lapply(bl_50k, 
+                                       run_malaria_model, 
+                                       folder= central_fold,
+                                       stochastic_run= FALSE)
 #stochastic_baseline_jobs<- obj$lapply(bl_stochastic, 
 #run_malaria_model, 
 #folder= stochastic_fold,
@@ -186,8 +194,8 @@ central_intvn_jobs <- obj$lapply(int,
 #stochastic_baseline_jobs<- obj$lapply(int_stochastic,  
 #run_malaria_model, 
 #folder= stochastic_fold)
-testing<- lapply(test, 
+test<- lapply(int,
               run_malaria_model, 
-              folder= paste0(malaria_dir, 
-                             '/central_estimates/baseline/'))
+              folder= central_fold)
 
+t <- obj$enqueue(1+5)
