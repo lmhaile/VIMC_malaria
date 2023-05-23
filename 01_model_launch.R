@@ -31,43 +31,41 @@ malaria_dir<- 'Q:/VIMC_files'      #  project directory where files are stored
 setwd('Q:/')
 
 # load in inputs from VIMC  ----------------------------------------------------
-pop<- read.csv(paste0(malaria_dir, '/inputs/202212rfp-1_dds-202208_int_pop_both.csv'))
-total_pop<- read.csv(paste0(malaria_dir, '/inputs/202212rfp-1_dds-202208_tot_pop_both.csv'))
-
+#pop<- read.csv(paste0(malaria_dir, '/inputs/202212rfp-1_dds-202208_int_pop_both.csv'))
+#total_pop<- read.csv(paste0(malaria_dir, '/inputs/202212rfp-1_dds-202208_tot_pop_both.csv'))
 # le<- read.csv(paste0(malaria_dir, '/inputs/202212rfp-1_dds-202208_life_ex_both.csv'))
-coverage<- read.csv(paste0(malaria_dir, '/inputs/coverage_202212rfp-1_malaria-mal4-default.csv'))
-mort<- read.csv(paste0(malaria_dir, '/inputs/mortality.csv'))
+#coverage<- read.csv(paste0(malaria_dir, '/inputs/coverage_202212rfp-1_malaria-mal4-default.csv'))
+#mort<- read.csv(paste0(malaria_dir, '/inputs/mortality.csv'))
 # fert<- read.csv(paste0(code_dir, '/inputs/fertility.csv'))
 
 # pull site data  --------------------------------------------------------------
 site<- foresite::MWI
 site<- site::single_site(site, 54)
 
-
 # format mortality data
-mort<- mort[, c('age_to', 'year', 'value')]
-mort<- data.table(mort)
-mort[age_to== 0, age_to:= 1]
-mort[, age_to:= age_to * 365]
+#mort<- mort[, c('age_to', 'year', 'value')]
+#mort<- data.table(mort)
+#mort[age_to== 0, age_to:= 1]
+#mort[, age_to:= age_to * 365]
 
 # bind on a baseline year
-bl_yr<- mort[year== min(mort$year)]
-bl_yr[,year:= 0]
-mort<- rbind(bl_yr, mort)
+#bl_yr<- mort[year== min(mort$year)]
+#bl_yr[,year:= 0]
+#mort<- rbind(bl_yr, mort)
 
-mort_mat<- dcast(mort, year ~ age_to, value.var = 'value')
-setnames(mort_mat, 'year', 'timesteps')
-mort_mat<- data.table(mort_mat)
-mort_mat<- mort_mat[,timesteps:= timesteps* 365]
-mort_mat <- mort_mat |>
-  select(-timesteps)
+#mort_mat<- dcast(mort, year ~ age_to, value.var = 'value')
+#setnames(mort_mat, 'year', 'timesteps')
+#mort_mat<- data.table(mort_mat)
+#mort_mat<- mort_mat[,timesteps:= timesteps* 365]
+#mort_mat <- mort_mat |>
+  #select(-timesteps)
 
 
-site$population<- merge(site$population, total_pop[, c('year', 'value')], by = 'year')
-site$population<- site$population |>
-  select(-pop)
-site$population<- site$population |>
-  rename(pop = value)
+#site$population<- merge(site$population, total_pop[, c('year', 'value')], by = 'year')
+#site$population<- site$population |>
+  #select(-pop)
+#site$population<- site$population |>
+  #rename(pop = value)
 
 # plot initial vaccine coverage  -----------------------------------------------
 plot_interventions_combined(
@@ -130,11 +128,11 @@ int<- prep_inputs(intvn,
 
 
 # prep stochastic burden estimate inputs
-int_stochastic<- lapply(int, prep_stochastic_inputs, draws= 10)
-int_stochastic<- flatten(int_stochastic)
+#int_stochastic<- lapply(int, prep_stochastic_inputs, draws= 10)
+#int_stochastic<- flatten(int_stochastic)
 
-bl_stochastic<- lapply(bl, prep_stochastic_inputs, draws= 10)
-bl_stochastic<- flatten(bl_stochastic)
+#bl_stochastic<- lapply(bl, prep_stochastic_inputs, draws= 10)
+#bl_stochastic<- flatten(bl_stochastic)
 
 # submit jobs to cluster  ------------------------------------------------------
 message(paste0('submitting ', length(bl),  ' central burden jobs'))
@@ -164,20 +162,16 @@ central_fold<- paste0(malaria_dir,
 stochastic_fold<-  paste0(malaria_dir, 
                           '/stochastic_estimates/baseline/')
 
-central_baseline_jobs_5k <- obj$lapply(bl_5k, 
+central_baseline_jobs <- obj$lapply(bl, 
                                     run_malaria_model, 
                                     folder= central_fold,
                                     stochastic_run= FALSE)
 
-central_baseline_jobs_50k <- obj$lapply(bl_50k, 
-                                       run_malaria_model, 
-                                       folder= central_fold,
-                                       stochastic_run= FALSE)
+
 #stochastic_baseline_jobs<- obj$lapply(bl_stochastic, 
 #run_malaria_model, 
 #folder= stochastic_fold,
 #stochastic_run= T)
-
 
 
 # run central burden  intervention jobs ----------------------------------------
