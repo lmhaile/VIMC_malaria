@@ -55,14 +55,15 @@ set_vaccine_coverage<- function(site, change= TRUE, terminal_year, rtss_target, 
   return(site)
 }
 
-prep_inputs<- function(site_data, mort_dt, death_rate_matrix, folder){
+prep_inputs<- function(site_data, folder, population, min_ages, max_ages){
   
   #' Prep inputs for batch launch for central burden estimate GAVI runs
   #'
   #' @param site_data  dataset with site files for country
-  #' @param mort_dt    dataset with mortality inputs
   #' @param folder     folder to save input parameters
   #' @param population population to run the model on
+  #' @param min_ages   minimum ages
+  #' @param max_ages   maximum ages
   #' output: list with site name, urban/rural grouping, iso code, and parameters to pass into cluster
   
   
@@ -87,39 +88,32 @@ prep_inputs<- function(site_data, mort_dt, death_rate_matrix, folder){
       vectors = site$vectors,
       seasonality = site$seasonality,
       eir= site$eir$eir[1],
-      overrides = list(human_population= 5000) 
+      overrides = list(human_population= population),
+      burnin = 5* 365
     )
-    
+
     year<- 365
     # Set clinical incidence rendering
-    params$clinical_incidence_rendering_min_ages = c(seq(0, 99, by = 1))*year
-    params$clinical_incidence_rendering_max_ages = c(seq(1, 99, by = 1)*year -1, 36500)
+    params$clinical_incidence_rendering_min_ages = min_ages 
+    params$clinical_incidence_rendering_max_ages = max_ages
     
     # Set severe incidence rendering
-    params$severe_incidence_rendering_min_ages = c(seq(0, 99, by = 1))*year
-    params$severe_incidence_rendering_max_ages = c(seq(1, 99, by = 1)*year -1, 36500)
+    params$severe_incidence_rendering_min_ages = min_ages 
+    params$severe_incidence_rendering_max_ages = max_ages 
     
     # Set clinical incidence rendering
-    params$clinical_incidence_rendering_min_ages = c(seq(0, 99, by = 1))*year
-    params$clinical_incidence_rendering_max_ages = c(seq(1, 99, by = 1)*year -1, 36500)
+    params$clinical_incidence_rendering_min_ages =  min_ages
+    params$clinical_incidence_rendering_max_ages = max_ages 
     
     # Set age group rendering
-    params$age_group_rendering_min_ages = c(seq(0, 99, by = 1))*year
-    params$age_group_rendering_max_ages = c(seq(1, 99, by = 1)*year -1, 36500)
+    params$age_group_rendering_min_ages = min_ages 
+    params$age_group_rendering_max_ages = max_ages 
     
-    # # set custom demography based on mortality inputs ------------------------
-    # params<- set_demography(
-    #   params,
-    #   agegroups= unique(mort_dt$age_to),
-    #   timesteps = unique(mort_dt$year)*365,
-    #   deathrates = death_rate_matrix
-    #   
-    # )
-    # 
     inputs<- list('param_list'= params, 'site_name'= site_name, 'ur'= ur, 'iso'= iso)
     
     write_rds(inputs, paste0(folder, 'input_parameters/', site_name, '_', ur, '_', iso, '.rds'))
     
+    print('saved input')
     return(paste0(site_name, '_', ur, '_', iso))
   }
   output<- lapply(c(1:jobs), prep_site_data)
@@ -128,7 +122,6 @@ prep_inputs<- function(site_data, mort_dt, death_rate_matrix, folder){
 prep_stochastic_inputs<- function(site, draws){
   
   #' Pull stochastic parameters and calibrates for stochastic model runs
-  #'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABIAAAASCAYAAABWzo5XAAAAWElEQVR42mNgGPTAxsZmJsVqQApgmGw1yApwKcQiT7phRBuCzzCSDSHGMKINIeDNmWQlA2IigKJwIssQkHdINgxfmBBtGDEBS3KCxBc7pMQgMYE5c/AXPwAwSX4lV3pTWwAAAABJRU5ErkJggg==
   #' @param site_data List created by prep_inputs. 
   #'                  List contains site name, urban/rural grouping, iso code, and parameters to pass into cluster
   #' @param draws     The number of stochastic parameter draws you would like to pull   
@@ -289,6 +282,7 @@ dt<- unique(dt, by= grouping)
  #  save output to folder
   write_rds(dt, file= paste0(folder, 'aggregated_output_', site, '.RDS'))
   return(dt)
+  
   message('completed aggregation')
   
 }
@@ -316,7 +310,7 @@ aggregate_further<- function(dt){
 # calculating outputs ----------------------------------------------------------
 
 
-calculate_deaths_ylls<- function(dt, cfr= 0.215, scaler= 0.5, lifespan= 63){
+calculate_deaths_ylls<- function(dt, cfr= 0.215, scaler= 0.57, lifespan= 63){
   
   #' Calculate deaths + years of life lost (YLLs) per GTS method.
   #' Where severe cases= 0, deaths= 0. Additionally remove a proportion of the cases that have received treatment.
@@ -393,12 +387,12 @@ calculate_ylds_dalys<- function(dt,
   
   # calculate YLDs  ---
   dt[ age_years_upper < 5, 
-      yld:= severe_incidence * severe_dw * severe_episode_length * interval + 
-        clinical_incidence * moderate_dw * clin_episode_length * interval]
+      yld:= severe_incidence * severe_dw * severe_episode_length * 365 * interval + 
+        clinical_incidence * moderate_dw * clin_episode_length * 365 * interval]
   
   dt[ age_years_upper >= 5, 
-      yld:= severe_incidence * severe_dw * severe_episode_length * interval + 
-        clinical_incidence * mild_dw * clin_episode_length * interval]
+      yld:= severe_incidence * severe_dw * severe_episode_length * 365 * interval + 
+        clinical_incidence * mild_dw * clin_episode_length * 365 * interval]
   
   # calculate DALYs ---
   dt<- dt |>
@@ -669,4 +663,76 @@ mortality_rate <- function(x, scaler){
   x <- x |>
     dplyr::mutate(mortality = scaler * .data$severe)
   return(x)
+}
+
+
+
+prep_inputs_rfp<- function(site_data, mort_dt, death_rate_matrix, folder){
+  
+  #' Prep inputs for batch launch for central burden estimate GAVI runs
+  #'
+  #' @param site_data  dataset with site files for country
+  #' @param mort_dt    dataset with mortality inputs
+  #' @param folder     folder to save input parameters
+  #' @param population population to run the model on
+  #' output: list with site name, urban/rural grouping, iso code, and parameters to pass into cluster
+  
+  
+  # how many sites in this country?
+  jobs<- nrow(site_data$sites)
+  
+  message(paste0('prepping ', jobs, ' jobs for model launch'))
+  
+  prep_site_data<- function(num){
+    site<- site::single_site(site_file= site_data, index= num) 
+    
+    ## get site info
+    site_name<- site$sites$name_1
+    ur<- site$sites$urban_rural
+    iso<- site$sites$iso3c
+    message(paste0('prepping inputs for site ', site_name, ' ', ur))
+    
+    # pull parameters for this site
+    params<- site::site_parameters(
+      interventions = site$interventions,
+      demography = site$demography,
+      vectors = site$vectors,
+      seasonality = site$seasonality,
+      eir= site$eir$eir[1],
+      overrides = list(human_population= 5000),
+      burnin = 5* 365
+    )
+    
+    year<- 365
+    # Set clinical incidence rendering
+    params$clinical_incidence_rendering_min_ages = c(seq(0, 99, by = 1))*year
+    params$clinical_incidence_rendering_max_ages = c(seq(1, 99, by = 1)*year -1, 36500)
+    
+    # Set severe incidence rendering
+    params$severe_incidence_rendering_min_ages = c(seq(0, 99, by = 1))*year
+    params$severe_incidence_rendering_max_ages = c(seq(1, 99, by = 1)*year -1, 36500)
+    
+    # Set clinical incidence rendering
+    params$clinical_incidence_rendering_min_ages = c(seq(0, 99, by = 1))*year
+    params$clinical_incidence_rendering_max_ages = c(seq(1, 99, by = 1)*year -1, 36500)
+    
+    # Set age group rendering
+    params$age_group_rendering_min_ages = c(seq(0, 99, by = 1))*year
+    
+    # # set custom demography based on mortality inputs ------------------------
+    # params<- set_demography(
+    #   params,
+    #   agegroups= unique(mort_dt$age_to),
+    #   timesteps = unique(mort_dt$year)*365,
+    #   deathrates = death_rate_matrix
+    #   
+    # )
+    # 
+    inputs<- list('param_list'= params, 'site_name'= site_name, 'ur'= ur, 'iso'= iso)
+    
+    write_rds(inputs, paste0(folder, 'input_parameters/', site_name, '_', ur, '_', iso, '.rds'))
+    
+    return(paste0(site_name, '_', ur, '_', iso))
+  }
+  output<- lapply(c(1:jobs), prep_site_data)
 }

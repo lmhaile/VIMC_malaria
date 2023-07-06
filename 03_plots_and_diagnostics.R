@@ -28,6 +28,8 @@ code_dir<- 'Q:/VIMC_malaria/' #  directory where code is stored
 malaria_dir<- 'Q:/VIMC_files'      #  project directory where files are stored
 setwd('Q:/')
 
+intvn<-read.csv(paste0(malaria_dir, '/output/central_burden_estimates/central_burden_vaccine.csv'))
+bl<- read.csv(paste0(malaria_dir, '/output/central_burden_estimates/central_burden_baseline.csv'))
 
 # plot outputs over time  ------------------------------------------------------
 intvn<- intvn |> mutate( scenario = 'intervention')
@@ -38,6 +40,20 @@ output<- rbind(intvn, bl, fill= T)
 loadfonts(device = 'win')
 
 pdf(paste0(malaria_dir, '/plots/diagnostics.pdf'))
+
+
+# load in final outputs from rfp 
+output_rfp_bl<- read.xlsx('Q:/VIMC_malaria_rfp/final/central_burden_baseline.xlsx')
+
+output_rfp_bl<- output_rfp_bl |> mutate(scenario = 'baseline')
+
+output_rfp_int<- read.xlsx('Q:/VIMC_malaria_rfp/final/central_burden_vaccine.xlsx')
+output_rfp_int<- output_rfp_int |> mutate( scenario = 'intervention')
+
+
+output_rfp<- rbind(output_rfp_bl, output_rfp_int)
+
+
 # clinical cases  --------------------------------------------------------------
 ggplot(data= output, mapping = aes(x= year, y= cases, color= scenario, fill= scenario))+
   geom_smooth(alpha= 0.2)  +
@@ -50,7 +66,7 @@ ggplot(data= output, mapping = aes(x= year, y= cases, color= scenario, fill= sce
   scale_fill_manual(values= wes_palette('Royal2', n= 2)) 
 
 
-ggplot(data= output, mapping = aes(x= year, y= cases, color= scenario, fill= scenario))+
+ggplot(data= output_rfp, mapping = aes(x= year, y= cases/cohort_size, color= scenario, fill= scenario))+
   geom_smooth(alpha= 0.2)  +
   facet_wrap_paginate(~age, 
                       scales = 'free',
