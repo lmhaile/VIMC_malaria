@@ -4,6 +4,7 @@
 ##  purpose test site file code locally to profile jobs
 ################################################################################
 
+rm(list= ls())
 # packages  --------------------------------------------------------------------
 library(scene)
 library(tidyverse)
@@ -28,14 +29,10 @@ total_pop<- read.csv(paste0(malaria_dir, '/inputs/202212rfp-1_dds-202208_tot_pop
 le<- read.csv(paste0(malaria_dir, '/inputs/202212rfp-1_dds-202208_life_ex_both.csv'))
 coverage<- read.csv(paste0(malaria_dir, '/inputs/coverage_202212rfp-1_malaria-mal4-default.csv'))
 mort<- read.csv(paste0(malaria_dir, '/inputs/mortality.csv'))
-
+year<- 365
 # objects ----------------------------------------------------------------------
 min = c(seq(0, 14, by= 1), seq(15, 80, by= 15)) * year
 max = c(seq(1, 15, by= 1), seq(35, 95, by= 15)) * year -1
-
-
-# min_ages = seq(0, 5) * year
-# max_ages = seq(1, 6) * year -1
 
 # directory --------------------------------------------------------------------
 folder<- 'Q:/VIMC_files/central_estimates/baseline/'
@@ -159,7 +156,7 @@ run_malaria_model<- function(model_input) {
   
   params<-model_input$param_list
   params$progress_bar<- TRUE
-  timesteps<- params$timesteps
+  timesteps<<- params$timesteps
   
   scenario<- model_input$scenario
   tag<- model_input$tag
@@ -191,3 +188,4 @@ run_malaria_model<- function(model_input) {
   
 }
 
+run_malaria_model(model_input)

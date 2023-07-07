@@ -7,8 +7,8 @@
 rm(list= ls())
 
 # packages  --------------------------------------------------------------------
-remotes::install_github('mrc-ide/site')
-install.packages('Q:/site_0.2.2.tar.gz')
+#remotes::install_github('mrc-ide/site')
+#install.packages('Q:/site_0.2.2.tar.gz')
 library(scene)
 library(tidyverse)
 library(furrr)
@@ -52,47 +52,6 @@ mort<- read.csv(paste0(malaria_dir, '/inputs/mortality.csv'))
 site<- foresite::NGA
 site<- site::single_site(site, 50)
 
-# merge on mortality inputs ----------------------------------------------------
-mort<- mort[, c('age_to', 'year', 'value')]
-mort<- data.table(mort)
-mort[age_to== 0, age_to:= 1]
-mort[, age_to:= age_to * 365]
-
-# cut off mortality data before 2000
-mort<- mort[year >= 2000]
-
-# maybe attempt to bind mortality rate data directly into site file
-# instead of using set_demography
-mort<- mort |>
-  rename(age_upper = age_to,
-         mortality_rate = value) |>
-  mutate(age_upper = age_upper/ 365) |>
-  mutate(iso3c= 'NGA',
-         country= 'Nigeria')
-
-# align age groups
-mort[age_upper > 1, age_upper := age_upper + 1]
-mort[age_upper== 121, age_upper:= 200]
-
-# reorder
-mort<- mort |>
-  select(iso3c, country, age_upper, year, mortality_rate)
-
-# bind on a year for youngest age group
-youngest<- data.table(site$demography)[age_upper== min(site$demography$age_upper)]
-
-mort<- rbind(youngest, mort)
-
-# replace demography input with VIMC input
-site$demography<- mort[year < 2051]
-
-# replace population in site file with population from VIMC inputs  ------------
-site$population<- merge(site$population, total_pop[, c('year', 'value')], by = 'year')
-site$population<- site$population |>
-select(-pop)
-site$population<- site$population |>
-rename(pop = value)
-
 # plot initial vaccine coverage  -----------------------------------------------
 plot_interventions_combined(
   interventions = site$interventions,
@@ -102,81 +61,160 @@ plot_interventions_combined(
   labels = c("ITN usage", "ITN model input", "Treatment","SMC", "PMC")
 )
 
-# make copies of site data (one for baseline scenario and one for intervention)
-baseline<- copy(site)
-intvn <- copy(site)
 
-# set vaccine coverage ---------------------------------------------------------
-# run a basic site to see if cases + deaths match what is expected
-# intvn <- set_vaccine_coverage(
-#   intvn,
-#   change = TRUE,
-#   terminal_year = 2050,
-#   rtss_target = 0.8,
-#   rtss_year = 2023
-# )
-# 
-# baseline <- set_vaccine_coverage(
-#   baseline,
-#   change = FALSE,
-#   terminal_year = 2050,
-#   rtss_target = 0.8,
-#   rtss_year = 2023
-# )
+prep_model_launch<- function(site, population, scenario, min_ages= min, max_ages= max, tag= 'population_50k'){
+  
+  mort<- read.csv(paste0(malaria_dir, '/inputs/mortality.csv'))
+  
+  #get site info
+  site_name<- site$sites$name_1
+  ur<- site$sites$urban_rural
+  iso<- site$sites$iso3c
 
-# plot the changes you made ----------------------------------------------------
-plot_interventions_combined(
-  interventions = intvn$interventions,
-  population = intvn$population,
-  group_var = c("country", "name_1"),
-  include = c("itn_use", "itn_input_dist", "tx_cov", "smc_cov", "pmc_cov"),
-  labels = c("ITN usage", "ITN model input", "Treatment","SMC", "PMC")
-)
+  # format mortality data
+  mort<- mort[, c('age_to', 'year', 'value')]
+  mort<- data.table(mort)
+  mort[age_to== 0, age_to:= 1]
+  mort[, age_to:= age_to * 365]
+  
+  # cut off mortality data before 2000
+  mort<- mort[year >= 2000]
+
+  mort<- mort |>
+    rename(age_upper = age_to,
+           mortality_rate = value) |>
+    mutate(age_upper = age_upper/ 365) |>
+    mutate(iso3c= 'NGA',
+           country= 'Nigeria')
+  
+  # align age groups
+  mort[age_upper > 1, age_upper := age_upper + 1]
+  mort[age_upper== 121, age_upper:= 200]
+  
+  # reorder
+  mort<- mort |>
+    select(iso3c, country, age_upper, year, mortality_rate)
+  
+  # bind on a year for youngest age group
+  youngest<- data.table(site$demography)[age_upper== min(site$demography$age_upper)]
+  mort<- rbind(youngest, mort)
+  
+  # replace population in site file with population from VIMC inputs  ------------
+  site$population<- merge(site$population, total_pop[, c('year', 'value')], by = 'year')#
+
+  site$population<- site$population |>
+    select(-pop)
+  
+  site$population<- site$population |>
+    rename(pop = value)
+  
+  message(paste0('prepping inputs for site ', site_name, ' ', ur))
+  
+  if (scenario== 'baseline'){
+    
+    # expand scenario out to 2050
+    site <- set_vaccine_coverage(
+      site,
+      change = FALSE,
+      terminal_year = 2050,
+      rtss_target = 0.8,
+      rtss_year = 2023
+    ) 
+    
+  }else if (scenario== 'intervention') {
+    site <- set_vaccine_coverage(
+      intvn,
+      change = TRUE,
+      terminal_year = 2050,
+      rtss_target = 0.8,
+      rtss_year = 2023
+    )
+  }
+  
+  
+  # pull parameters for this site
+  params<- site::site_parameters(
+    interventions = site$interventions,
+    demography = site$demography,
+    vectors = site$vectors,
+    seasonality = site$seasonality,
+    eir= site$eir$eir[1],
+    overrides = list(human_population= population)
+  )
+  year<- 365
+  
+  # Set clinical incidence rendering
+  params$clinical_incidence_rendering_min_ages = min_ages 
+  params$clinical_incidence_rendering_max_ages = max_ages
+  
+  # Set severe incidence rendering
+  params$severe_incidence_rendering_min_ages = min_ages 
+  params$severe_incidence_rendering_max_ages = max_ages 
+  
+  # Set clinical incidence rendering
+  params$clinical_incidence_rendering_min_ages =  min_ages
+  params$clinical_incidence_rendering_max_ages = max_ages 
+  
+  # Set age group rendering
+  params$age_group_rendering_min_ages = min_ages 
+  params$age_group_rendering_max_ages = max_ages 
+  
+  inputs<- list('param_list'= params, 'site_name'= site_name, 'ur'= ur, 'iso'= iso, 'tag'= tag, 'scenario'= scenario)
+  
+  return(inputs)
+  
+}
 
 
-# plot baseline to make sure they look different  ------------------------------
-plot_interventions_combined(
-  interventions = baseline$interventions,
-  population = baseline$population,
-  group_var = c("country", "name_1"),
-  include = c("itn_use", "itn_input_dist", "tx_cov", "smc_cov", "pmc_cov"),
-  labels = c("ITN usage", "ITN model input", "Treatment","SMC", "PMC")
-)
+model_input<- prep_model_launch(site, scenario= 'baseline', population = 50000)
 
-year<- 365
-# prep central burden estimate inputs ------------------------------------------
-bl <- prep_inputs(
-  baseline,
-  folder = paste0(malaria_dir, '/central_estimates/baseline/'),
-  population = 100,
-  min_ages = 0 * year,
-  max_ages = 15 * year -1
-)
+# run the model ----------------------------------------------------------------
 
-# int<- prep_inputs(intvn, 
-#                   folder= paste0(malaria_dir, '/central_estimates/intervention/'),
-#                   population = 100,
-#                   min_ages= c(seq(0, 80, by = 20)) * year,
-#                   max_ages = c(seq(20, 100, by = 20)) * year -1)
+run_malaria_model<- function(model_input) {
+  
+  params<-model_input$param_list
+  params$progress_bar<- TRUE
+  timesteps<<- params$timesteps
+  
+  scenario<- model_input$scenario
+  tag<- model_input$tag
+  
+  
+  model<- malariasimulation::run_simulation(timesteps = params$timesteps,
+                                            parameters = params) 
+  
+  model<- data.table(model)
+  model[, site_name:= input$site_name]
+  model[, urban_rural:=input$ur]
+  model[, iso:= input$iso]
+  
+  
+  # save model runs somewhere
+  message('saving the model')
+  saveRDS(model, file= paste0('Q:/VIMC_files/central_estimates/', 
+                              scenario, 
+                              'raw_model_output/raw_model_output_', 
+                              site_name,
+                              '_',
+                              ur,
+                              '_',
+                              iso,
+                              '_', 
+                              tag, 
+                              '.RDS'))
+  
+  
+}
 
+run_malaria_model(model_input)
 
-# prep stochastic burden estimate inputs
-#int_stochastic<- lapply(int, prep_stochastic_inputs, draws= 10)
-#int_stochastic<- flatten(int_stochastic)
-
-#bl_stochastic<- lapply(bl, prep_stochastic_inputs, draws= 10)
-#bl_stochastic<- flatten(bl_stochastic)
 
 # submit jobs to cluster  ------------------------------------------------------
-message(paste0('submitting ', length(bl),  ' central burden jobs'))
-#message(paste0('submitting ', length(int),  ' central burden jobs'))
-
-
 # load packages you will need to run malariasimulation package  ----------------
 packages<- c('dplyr', 'tidyr', 'data.table', 'malariasimulation')
 src <- conan::conan_sources("github::mrc-ide/malariasimulation")
 
-# save a context (working environment for your code) ---------------------------
+# save a context ---------------------------------------------------------------
 # additional script contains helper functions for larger scale model runs
 ctx <- context::context_save(
   'pkgs',
@@ -188,8 +226,7 @@ ctx <- context::context_save(
 config <- didehpc::didehpc_config(
   use_rrq = FALSE,
   cores = 1,
-  cluster = "fi--didemrchnb" ,
-  #"fi--dideclusthn", # , "fi--didemrchnb""fi--didemrchnb"
+  cluster = "fi--didemrchnb" , #"fi--dideclusthn", # , "fi--didemrchnb""fi--didemrchnb"
   template = "GeneralNodes"
   ## use for the wpia cluster
   #parallel = FALSE
@@ -205,41 +242,6 @@ obj <- didehpc::queue_didehpc(ctx, config)
 
 obj <- didehpc::queue_didehpc(ctx)
 
-# run central burden baseline jobs ---------------------------------------------
-central_fold<- paste0(malaria_dir, 
-                      '/central_estimates/baseline/') # folder you would like to save outputs in
-stochastic_fold<-  paste0(malaria_dir, 
-                          '/stochastic_estimates/baseline/')
-
-central_baseline_jobs <- obj$lapply(bl, 
-                                    run_malaria_model, 
-                                    folder= central_fold,
-                                    stochastic_run= FALSE,
-                                    tag= 'no_changes')
-
-
-#stochastic_baseline_jobs<- obj$lapply(bl_stochastic, 
-#run_malaria_model, 
-#folder= stochastic_fold,
-#stochastic_run= T)
-
-
-# run central burden  intervention jobs ----------------------------------------
-central_fold<- paste0(malaria_dir, 
-                      '/central_estimates/intervention/') # folder you would like to save outputs in
-stochastic_fold<-  paste0(malaria_dir, 
-                          '/stochastic_estimates/intervention/')
-
-# central_intvn_jobs <- obj$lapply(int, 
-#                                  run_malaria_model, 
-#                                  folder= central_fold,
-#                                  stochastic_run= FALSE,
-#                                  tag= 'VIMC_mortality')
-
-#stochastic_baseline_jobs<- obj$lapply(int_stochastic,  
-#run_malaria_model, 
-#folder= stochastic_fold)
-test<- lapply(int,
-              run_malaria_model, 
-              folder= central_fold)
+# run test job ---------------------------------------------
+job<- obj$enqueue(run_malaria_model(model_input))
 
