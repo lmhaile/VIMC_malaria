@@ -5,14 +5,14 @@
 ##            
 ######################################################
 
-#' set vaccine coverage using scene package
+#' Set vaccine coverage using scene package
 #'
-#' @param terminal_year year you would like to expand intervention coverage out to 
-#' @param change        would you like to set a certain coverage level? Boolean
-#' @param rtss_target   data set with mortality inputs
-#' @param rtss_year     year for target
-#' @param site          site data file 
-#' 
+#' @param   terminal_year year you would like to expand intervention coverage out to 
+#' @param   change        would you like to set a certain coverage level? Boolean
+#' @param   rtss_target   data set with mortality inputs
+#' @param   rtss_year     year for target
+#' @param   site          site data file
+#' @returns site file with updated vaccine coverage values 
 
 set_vaccine_coverage<- function(site, change= TRUE, terminal_year, rtss_target, rtss_year){
   
@@ -63,7 +63,7 @@ set_vaccine_coverage<- function(site, change= TRUE, terminal_year, rtss_target, 
 #' @param population population to run the model on
 #' @param min_ages   minimum ages
 #' @param max_ages   maximum ages
-#' output: list with site name, urban/rural grouping, iso code, and parameters to pass into cluster
+#' @returns list with site name, urban/rural grouping, iso code, and parameters to pass into cluster 
 
 
 prep_inputs<- function(site_data, folder, population, min_ages, max_ages){
@@ -131,8 +131,8 @@ prep_inputs_rfp<- function(site_data, mort_dt, death_rate_matrix, folder){
   #' @param mort_dt    dataset with mortality inputs
   #' @param folder     folder to save input parameters
   #' @param population population to run the model on
-  #' output: list with site name, urban/rural grouping, iso code, and parameters to pass into cluster
-  
+  #' @returns list with site name, urban/rural grouping, iso code, and parameters to pass into cluster
+
   
   # how many sites in this country?
   jobs<- nrow(site_data$sites)
@@ -175,15 +175,6 @@ prep_inputs_rfp<- function(site_data, mort_dt, death_rate_matrix, folder){
     # Set age group rendering
     params$age_group_rendering_min_ages = c(seq(0, 99, by = 1))*year
     
-    # # set custom demography based on mortality inputs ------------------------
-    # params<- set_demography(
-    #   params,
-    #   agegroups= unique(mort_dt$age_to),
-    #   timesteps = unique(mort_dt$year)*365,
-    #   deathrates = death_rate_matrix
-    #   
-    # )
-    # 
     inputs<- list('param_list'= params, 'site_name'= site_name, 'ur'= ur, 'iso'= iso)
     
     write_rds(inputs, paste0(folder, 'input_parameters/', site_name, '_', ur, '_', iso, '.rds'))
@@ -192,12 +183,14 @@ prep_inputs_rfp<- function(site_data, mort_dt, death_rate_matrix, folder){
   }
   output<- lapply(c(1:jobs), prep_site_data)
 }
+
+
 #' Pull stochastic parameters and calibrates for stochastic model runs
-#' @param site_data List created by prep_inputs. 
+#' 
+#' @param site List created by prep_inputs. 
 #'                  List contains site name, urban/rural grouping, iso code, and parameters to pass into cluster
-#' @param draws     The number of stochastic parameter draws you would like to pull   
-#' output: list with site name, urban/rural grouping, iso code, and additional 'stoch_draws'
-#'         list with stochastic draws equal to the number of draws requested.
+#' @param draws     The number of stochastic parameter draws you would like to pull
+#' @returns list with site name, urban/rural grouping, iso code, and additional 'stoch_draws' list with stochastic draws equal to the number of draws requested.
 
 prep_stochastic_inputs<- function(site, draws){
   

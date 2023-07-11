@@ -249,7 +249,7 @@ obj <- didehpc::queue_didehpc(ctx, config)
 filepaths<- list.files('Q:/VIMC/central_estimates/input_parameters/NGA/population_50k_all_VIMC_inputs/',
                        full.names= T)
 
-jobs<- obj$lapply(filepaths[[2]], run_malaria_model)
+jobs<- obj$lapply(filepaths, run_malaria_model)
 
 
 

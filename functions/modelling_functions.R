@@ -4,9 +4,11 @@
 # purpose helper functions for model runs
 ########################################################################
 
-#' run malaria model
+#' Run malariasimulation model for VIMC 
 #'
-#' @param filepath filepath where model inputs are 
+#' @param filepath filepath where model inputs are (list with model parameters and demographic info, produced by prep_model_launch)
+#' @returns model output saved in pre-specified VIMC_files folder
+#' 
 
 run_malaria_model<- function(filepath) {
   
@@ -35,11 +37,11 @@ run_malaria_model<- function(filepath) {
   saveRDS(model, file= paste0('Q:/VIMC_files/central_estimates/', 
                               scenario, 
                               'raw_model_output/raw_model_output_', 
-                              site_name,
+                              model_input$site_name,
                               '_',
-                              ur,
+                              model_input$ur,
                               '_',
-                              iso,
+                              model_input$iso,
                               '_', 
                               tag, 
                               '.RDS'))
@@ -48,14 +50,14 @@ run_malaria_model<- function(filepath) {
 }
 
 
+#' Prep inputs (without parameter updates)-- not explicitly passing site_data object in but this should be updated
+#' 
+#' @param input    list with parameter_filepath and output_folder
+#' @param tagging tag to save input file with for identification
+#' @returns model outputs for site with provided parameters (saved into pre-specified folder) 
 
 run_malaria_model_rfp<- function(input){
   
-  #' Prep inputs (without parameter updates)-- not explicitly passing site_data object in but this should be updated
-  #' 
-  #' @param input    list with parameter_filepath and output_folder
-  #' @param tag tag to save input file with for identification
-  #' output: model outputs for site with provided parameters (saved into pre-specified folder)
   
   # run the model
   message('running the model')
