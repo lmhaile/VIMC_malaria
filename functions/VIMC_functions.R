@@ -7,16 +7,17 @@
 
 # parameterizing inputs --------------------------------------------------------
 
+#' set vaccine coverage using scene package
+#'
+#' @param terminal_year year you would like to expand intervention coverage out to 
+#' @param change        would you like to set a certain coverage level? Boolean
+#' @param rtss_target   data set with mortality inputs
+#' @param rtss_year     year for target
+#' @param site          site data file 
+#' 
+
 set_vaccine_coverage<- function(site, change= TRUE, terminal_year, rtss_target, rtss_year){
   
-  #' set vaccine coverage using scene package
-  #'
-  #' @param terminal_year year you would like to expand intervention coverage out to 
-  #' @param change        would you like to set a certain coverage level? Boolean
-  #' @param rtss_target   dataset with mortality inputs
-  #' @param rtss_year     year for target
-  #' @param site          site data file 
-  #' 
   
   require(scene)
   
@@ -55,16 +56,18 @@ set_vaccine_coverage<- function(site, change= TRUE, terminal_year, rtss_target, 
   return(site)
 }
 
+
+#' Prep inputs for batch launch for central burden estimate GAVI runs
+#'
+#' @param site_data  dataset with site files for country
+#' @param folder     folder to save input parameters
+#' @param population population to run the model on
+#' @param min_ages   minimum ages
+#' @param max_ages   maximum ages
+#' output: list with site name, urban/rural grouping, iso code, and parameters to pass into cluster
+
+
 prep_inputs<- function(site_data, folder, population, min_ages, max_ages){
-  
-  #' Prep inputs for batch launch for central burden estimate GAVI runs
-  #'
-  #' @param site_data  dataset with site files for country
-  #' @param folder     folder to save input parameters
-  #' @param population population to run the model on
-  #' @param min_ages   minimum ages
-  #' @param max_ages   maximum ages
-  #' output: list with site name, urban/rural grouping, iso code, and parameters to pass into cluster
   
   
   # how many sites in this country?
@@ -114,19 +117,21 @@ prep_inputs<- function(site_data, folder, population, min_ages, max_ages){
     write_rds(inputs, paste0(folder, 'input_parameters/', site_name, '_', ur, '_', iso, '.rds'))
     
     print('saved input')
+    
     return(paste0(site_name, '_', ur, '_', iso))
   }
   output<- lapply(c(1:jobs), prep_site_data)
 }
 
+#' Pull stochastic parameters and calibrates for stochastic model runs
+#' @param site_data List created by prep_inputs. 
+#'                  List contains site name, urban/rural grouping, iso code, and parameters to pass into cluster
+#' @param draws     The number of stochastic parameter draws you would like to pull   
+#' output: list with site name, urban/rural grouping, iso code, and additional 'stoch_draws'
+#'         list with stochastic draws equal to the number of draws requested.
+
 prep_stochastic_inputs<- function(site, draws){
   
-  #' Pull stochastic parameters and calibrates for stochastic model runs
-  #' @param site_data List created by prep_inputs. 
-  #'                  List contains site name, urban/rural grouping, iso code, and parameters to pass into cluster
-  #' @param draws     The number of stochastic parameter draws you would like to pull   
-  #' output: list with site name, urban/rural grouping, iso code, and additional 'stoch_draws'
-  #'         list with stochastic draws equal to the number of draws requested.
   
   format_stochastic_inputs<- function(x){
     
@@ -153,17 +158,17 @@ prep_stochastic_inputs<- function(site, draws){
 
 # transforming inputs ----------------------------------------------------------
 
+#' Create a new time column for aggregation
+#'
+#' @param x Input data.frame
+#' @param time_divisor Aggregation level. Default = 1 (no aggregation).
+#' Setting to 365 would allow annual aggregation, 30 monthly, 7 weekly etc.
+#' @param baseline_t A baseline time to add to the time output
+#'
+#' @export
+#' 
 
 time_transform <- function(x, time_divisor = 1, baseline_t = 0){
-  #' Create a new time column for aggregation
-  #'
-  #' @param x Input data.frame
-  #' @param time_divisor Aggregation level. Default = 1 (no aggregation).
-  #' Setting to 365 would allow annual aggregation, 30 monthly, 7 weekly etc.
-  #' @param baseline_t A baseline time to add to the time output
-  #'
-  #' @export
-  #' 
   if(max(x$timestep) %% time_divisor != 0){
     warning("Number of timesteps not divisible exactly by level, group may be unequal")
   }
@@ -176,14 +181,14 @@ time_transform <- function(x, time_divisor = 1, baseline_t = 0){
 }
 
 
+#' Remove burn in period from simulation output
+#'
+#' @param x Input data.frame
+#' @param burnin Length of burn in period in days
+#'
+#' @export
 
 drop_burnin <- function(x, burnin){
-  #' Remove burn in period from simulation output
-  #'
-  #' @param x Input data.frame
-  #' @param burnin Length of burn in period in days
-  #'
-  #' @export
   if(burnin >= max(x$timestep)){
     stop("burn in period must be < the maximum timestep")
   }
@@ -197,20 +202,20 @@ drop_burnin <- function(x, burnin){
   return(x)
 }
 
+#' aggregate incident cases based on a pre-determined time interval (expressed in days). 
+#' aggregated to the country level or site level.
+#' 
+#' @param dt             raw model output from malariasimulation package
+#' @param interval       time period you would like to calculate incidence over, expressed in days.
+#' @param folder         folder to save aggregated output to
+
+#' output: data table with summed cases and rates over specified time interval and location grouping.
+
+# reformat case outputs to long
+# need clinical cases, severe cases, population, number treated, and number detected
 
 aggregate_outputs<- function(dt, interval, folder){
   
-  #' aggregate incident cases based on a pre-determined time interval (expressed in days). 
-  #' aggregated to the country level or site level.
-  #' 
-  #' @param dt             raw model output from malariasimulation package
-  #' @param interval       time period you would like to calculate incidence over, expressed in days.
-  #' @param folder         folder to save aggregated output to
-  
-  #' output: data table with summed cases and rates over specified time interval and location grouping.
-  
-  # reformat case outputs to long
-  # need clinical cases, severe cases, population, number treated, and number detected
   
   site<- unique(dt$site_name)
   
@@ -287,12 +292,14 @@ dt<- unique(dt, by= grouping)
   
 }
 
+
+#' aggregate outputs further to the country or site level
+#' aggregated to the country level or site level.
+#' 
+#' @param location if 'iso', aggregate based on ISO code. If 'site_name', aggregate to site level.
+
+
 aggregate_further<- function(dt){
-  #' aggregate outputs further to the country or site level
-  #' aggregated to the country level or site level.
-  #' 
-  #' @param location if 'iso', aggregate based on ISO code. If 'site_name', aggregate to site level.
-  
   
   dt<- data.table(dt)
   
@@ -309,22 +316,22 @@ aggregate_further<- function(dt){
 }
 # calculating outputs ----------------------------------------------------------
 
+#' Calculate deaths + years of life lost (YLLs) per GTS method.
+#' Where severe cases= 0, deaths= 0. Additionally remove a proportion of the cases that have received treatment.
+#' 
+#' @param dt               malariasimulation model outputs with columns 'severe' for severe incidence and 'n_treated' for number of individuals treated
+#' @param cfr              per GTS method, deaths are calculated using a case fatality ratio (CFR) value that is applied to severe incidence.
+#'                         see World Malaria Report and Wilson et al. for more information.
+#' @param scaler we remove a proportion of cases that have received treatment, assuming that 50% of treated cases remit and
+#'                         are no longer susceptible to mortality.
+#' @param lifespan         expected lifespan used to calculate YLLs. 
+#'                         YLLs are calculated by multiplying deaths by the number of years an individual was expected to live past their year of death.
+#'                         when comparing YLLs across different locations, it is recommended to use the same lifespan across YLL calculations.
+#'                         Typically, you should use the highest observed life expectancy in the region/ location you are studying.
+#' Output: data table with columns titled 'deaths' and 'yll'
 
 calculate_deaths_ylls<- function(dt, cfr= 0.215, scaler= 0.57, lifespan= 63){
   
-  #' Calculate deaths + years of life lost (YLLs) per GTS method.
-  #' Where severe cases= 0, deaths= 0. Additionally remove a proportion of the cases that have received treatment.
-  #' 
-  #' @param dt               malariasimulation model outputs with columns 'severe' for severe incidence and 'n_treated' for number of individuals treated
-  #' @param cfr              per GTS method, deaths are calculated using a case fatality ratio (CFR) value that is applied to severe incidence.
-  #'                         see World Malaria Report and Wilson et al. for more information.
-  #' @param scaler we remove a proportion of cases that have received treatment, assuming that 50% of treated cases remit and
-  #'                         are no longer susceptible to mortality.
-  #' @param lifespan         expected lifespan used to calculate YLLs. 
-  #'                         YLLs are calculated by multiplying deaths by the number of years an individual was expected to live past their year of death.
-  #'                         when comparing YLLs across different locations, it is recommended to use the same lifespan across YLL calculations.
-  #'                         Typically, you should use the highest observed life expectancy in the region/ location you are studying.
-  #' Output: data table with columns titled 'deaths' and 'yll'
   
   
   message('calculating deaths and YLLs')
@@ -351,6 +358,29 @@ calculate_deaths_ylls<- function(dt, cfr= 0.215, scaler= 0.57, lifespan= 63){
   return(dt)
 }
 
+
+#' Calculate Years Lived with Disability (YLDs) and Disability-Adjusted Life-Years
+#' based on disability weights from the Global Burden of Disease study.
+#' 
+#' Disability weights sourced here:
+#' https://view.officeapps.live.com/op/view.aspx?src=https%3A%2F%2Fghdx.healthdata.org%2Fsites%2Fdefault%2Ffiles%2Frecord-attached-files%2FIHME_GBD_2017_DISABILITY_WEIGHTS_Y2018M11D08.XLSX&wdOrigin=BROWSELINK
+#' 
+#' Keep in mind this is an approximation of YLD estimation from the GBD study; disability due to comorbid conditions
+#' such as motor impairment and anemia are excluded.
+#' 
+#' For now, we assume that cases under 5 are moderate, due to the higher severity of malaria at younger ages.
+#' This assumption may be revisited in the future, 
+#' @param dt                    input dataset with columns 'clinical' for clinical incidence,
+#'                              'severe' for severe incidence, 'deaths', 'ylls', 'age_years_start', and 'age_years_end'
+#' @param mild_dw               disability weight for mild malaria
+#' @param moderate_dw           disability weight for moderate malaria
+#' @param severe_dw             disability weight for severe malaria
+#' @param clin_episode_length   length of an episode of clinical malaria
+#' @param severe_episode_length length of an episode of severe malaria 
+#' @param interval              period of time you are calculating YLDs for. This determines disease episode length.
+#' 
+#' Output: data table with columns 'ylds' and 'dalys'
+
 calculate_ylds_dalys<- function(dt, 
                                 mild_dw= 0.006, 
                                 moderate_dw= 0.051, 
@@ -359,27 +389,6 @@ calculate_ylds_dalys<- function(dt,
                                 severe_episode_length= 0.04795,
                                 interval= 365){
   
-  #' Calculate Years Lived with Disability (YLDs) and Disability-Adjusted Life-Years
-  #' based on disability weights from the Global Burden of Disease study.
-  #' 
-  #' Disability weights sourced here:
-  #' https://view.officeapps.live.com/op/view.aspx?src=https%3A%2F%2Fghdx.healthdata.org%2Fsites%2Fdefault%2Ffiles%2Frecord-attached-files%2FIHME_GBD_2017_DISABILITY_WEIGHTS_Y2018M11D08.XLSX&wdOrigin=BROWSELINK
-  #' 
-  #' Keep in mind this is an approximation of YLD estimation from the GBD study; disability due to comorbid conditions
-  #' such as motor impairment and anemia are excluded.
-  #' 
-  #' For now, we assume that cases under 5 are moderate, due to the higher severity of malaria at younger ages.
-  #' This assumption may be revisited in the future, 
-  #' @param dt                    input dataset with columns 'clinical' for clinical incidence,
-  #'                              'severe' for severe incidence, 'deaths', 'ylls', 'age_years_start', and 'age_years_end'
-  #' @param mild_dw               disability weight for mild malaria
-  #' @param moderate_dw           disability weight for moderate malaria
-  #' @param severe_dw             disability weight for severe malaria
-  #' @param clin_episode_length   length of an episode of clinical malaria
-  #' @param severe_episode_length length of an episode of severe malaria 
-  #' @param interval              period of time you are calculating YLDs for. This determines disease episode length.
-  #' 
-  #' Output: data table with columns 'ylds' and 'dalys'
   
   require(data.table)
   
@@ -423,11 +432,13 @@ reformat_vimc_outputs<- function(dt){
 }
 
 
+#' Calculates cases, deaths, and dalys averted between intervention and baseline scenario.
+#' @param intvn_dt               model outputs for intervention scenario
+#' @param baseline               model outputs for baseline scenario
+#' 
+
+
 calculate_cases_deaths_averted<- function(intvn_dt, bl_dt){
-  #' Calculates cases, deaths, and dalys averted between intervention and baseline scenario.
-  #' @param intvn_dt               model outputs for intervention scenario
-  #' @param baseline               model outputs for baseline scenario
-  #' 
   
   intvn_dt<- intvn_dt |>
     select(time, iso, run, age_years_start, age_years_end,
@@ -474,6 +485,8 @@ calculate_cases_deaths_averted<- function(intvn_dt, bl_dt){
 #' @inheritParams time_transform
 #'
 #' @export
+
+
 get_prevalence <- function(x, time_divisor, baseline_t, age_divisor){
   prevalence <- x |>
     prevalence_estimate() |>
