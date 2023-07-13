@@ -88,7 +88,7 @@ inputs <- data.table(
     if(input1 %like% 'PFPR' | input2 %like% 'PFPR'){
       
       dt<- drop_burnin(dt, 15 * 365)
-      dt <- dt(
+      dt <- get_rates(
         dt,
         time_divisor = 365,
         baseline_t = 0,

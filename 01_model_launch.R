@@ -36,18 +36,18 @@ source("Q:/VIMC_malaria/functions/modelling_functions.R")
 # directories ------------------------------------------------------------------
 drat::addRepo("malaria", "file:///f:/drat")
 code_dir<- 'Q:/VIMC_malaria/'      #  directory where code is stored
-malaria_dir<- 'Q:/VIMC_files'      #  project directory where files are stored
+malaria_dir<- 'Q:/VIMC/central_estimates/'      #  project directory where files are stored
+input_dir<- 'Q:/VIMC'
 setwd('Q:/')
 
 # load in inputs from VIMC  ----------------------------------------------------
-pop<- read.csv(paste0(malaria_dir, '/inputs/202212rfp-1_dds-202208_int_pop_both.csv'))
-total_pop<- read.csv(paste0(malaria_dir, '/inputs/202212rfp-1_dds-202208_tot_pop_both.csv'))
-le<- read.csv(paste0(malaria_dir, '/inputs/202212rfp-1_dds-202208_life_ex_both.csv'))
-coverage<- read.csv(paste0(malaria_dir, '/inputs/coverage_202212rfp-1_malaria-mal4-default.csv'))
-mort<- read.csv(paste0(malaria_dir, '/inputs/mortality.csv'))
+pop<- read.csv(paste0(input_dir, '/inputs/202212rfp-1_dds-202208_int_pop_both.csv'))
+total_pop<- read.csv(paste0(input_dir, '/inputs/202212rfp-1_dds-202208_tot_pop_both.csv'))
+le<- read.csv(paste0(input_dir, '/inputs/202212rfp-1_dds-202208_life_ex_both.csv'))
+coverage<- read.csv(paste0(input_dir, '/inputs/coverage_202212rfp-1_malaria-mal4-default.csv'))
+mort<- read.csv(paste0(input_dir, '/inputs/mortality.csv'))
 
 # format mortality data --------------------------------------------------------
-mort<- read.csv(paste0(malaria_dir, '/inputs/mortality.csv'))
 mort<- mort[, c('age_to', 'year', 'value')]
 mort<- data.table(mort)
 mort[age_to== 0, age_to:= 1]
@@ -73,7 +73,7 @@ mort<- mort |>
 
 # pull site data  --------------------------------------------------------------
 site_data<- foresite::NGA
-#site<- site::single_site(site, 50)
+#site_data<- site::single_site(site_data, 50)
 
 # plot initial vaccine coverage  -----------------------------------------------
 plot_interventions_combined(
@@ -84,8 +84,22 @@ plot_interventions_combined(
   labels = c("ITN usage", "ITN model input", "Treatment","SMC", "PMC")
 )
 
+#' Format input parameters for VIMC sites
+#'
+#' @param   site_data          site data file for a particular country
+#' @param   demography         if TRUE, incorporate VIMC demography inputs
+#' @param   population         human population to run model on
+#' @param   scenario           'baseline' or 'intervention'
+#' @param   short_run          if true, shorten site file data to year pre-2020
+#' @param   min_ages           minimum ages (in timesteps) for incidence/ prevalence outputs
+#' @param   max_ages           maximum ages (in timesteps) for incidence/ prevalence outputs
+#' @param   tag                description of model runs you would like to carry out
+#' @returns list with input parameters and demographic info, as inputs for run_malaria_model
+
 
 prep_model_launch<- function(site_data, 
+                             vimc_mortality,
+                             vimc_population,
                              population, 
                              scenario, 
                              min_ages, 
@@ -105,43 +119,45 @@ prep_model_launch<- function(site_data,
   iso<- site$sites$iso3c
   
   # create a directory to save your output
-  if(dir.exists(paste0('M:/Lydia/VIMC_files/central_estimates/', iso))== FALSE){
-    dir.create(paste0('M:/Lydia/VIMC_files/central_estimates/', iso))
+  if(dir.exists(paste0('Q:/VIMC/central_estimates/input_parameters/', iso))== FALSE){
+    dir.create(paste0('Q:/VIMC/central_estimates/input_parameters/', iso))
   }
   
-  if(dir.exists(paste0('M:/Lydia/VIMC_files/central_estimates/', iso, '/', tag))== FALSE){
-    dir.create(paste0('M:/Lydia/VIMC_files/central_estimates/', iso, '/', tag))
+  if(dir.exists(paste0('Q:/VIMC/central_estimates/input_parameters/', iso, '/', tag))== FALSE){
+    dir.create(paste0('Q:/VIMC/central_estimates/input_parameters/', iso, '/', tag))
   }
 
+  if(vimc_mortality== TRUE){
   # bind on a year for youngest age group
   youngest<- data.table(site$demography)[age_upper== min(site$demography$age_upper)]
   mort_dt<- rbind(youngest, mort)
   site$demography<- mort_dt
+  }
   
+  if (vimc_population== TRUE){
   # replace population in site file with population from VIMC inputs  ------------
   site$population<- merge(site$population, total_pop[, c('year', 'value')], by = 'year')
-
   site$population<- site$population |>
     select(-pop)
   site$population<- site$population |>
     rename(pop = value)
-  
+  }
   message(paste0('prepping inputs for site ', site_name, ' ', ur))
   
   if (scenario== 'baseline'){
     
-    # expand scenario out to 2050
+    # # expand scenario out to 2050
     site <- set_vaccine_coverage(
       site,
       change = FALSE,
       terminal_year = 2050,
-      rtss_target = 0.8,
-      rtss_year = 2023
-    ) 
-    
+      rtss_target = NULL,
+      rtss_year = NULL
+    )
+
   }else if (scenario== 'intervention') {
     site <- set_vaccine_coverage(
-      intvn,
+      site,
       change = TRUE,
       terminal_year = 2050,
       rtss_target = 0.8,
@@ -149,6 +165,7 @@ prep_model_launch<- function(site_data,
     )
   }
   
+ # calibration<- quick_calibration(site)
   
   # pull parameters for this site
   params<- site::site_parameters(
@@ -187,17 +204,7 @@ prep_model_launch<- function(site_data,
   
   write_rds(
     inputs,
-    paste0(
-      'M:/Lydia/VIMC_files/central_estimates/',
-      iso,
-      '/',
-      tag,
-      '/',
-      site_name,
-      '_',
-      ur,
-      '_',
-      scenario,
+    paste0('Q:/VIMC/central_estimates/input_parameters/',iso, '/', tag, '/', site_name, '_', ur, '_', scenario,
       '.rds'
     )
   )
@@ -211,10 +218,17 @@ prep_model_launch<- function(site_data,
 year<- 365
 model_input<- prep_model_launch(site_data, 
                                 scenario= 'baseline', 
+                                vimc_mortality= TRUE,
+                                vimc_population= FALSE,
                                 min_ages = c(seq(0, 14, by= 1), seq(15, 80, by= 15)) * year,
-                                max_ages = c(seq(1, 15, by= 1), seq(35, 95, by= 15)) * year -1,
+                                max_ages = c(seq(1, 15, by= 1), seq(30, 95, by= 15)) * year -1,
                                 population = 50000,
-                                tag= 'population_50k_all_VIMC_inputs')
+                                tag= 'mortality_change_test_run')
+
+
+
+
+
 
 # submit jobs to cluster  ------------------------------------------------------
 # load packages you will need to run malariasimulation package  ----------------
@@ -246,7 +260,10 @@ obj <- didehpc::queue_didehpc(ctx, config)
 #obj <- didehpc::queue_didehpc(ctx)
 
 # launch jobs ---------------------------------------------
-filepaths<- list.files('Q:/VIMC/central_estimates/input_parameters/NGA/population_50k_all_VIMC_inputs/',
+iso<- 'NGA'
+tag<- 'mortality_change_test_run'
+
+filepaths<- list.files(paste0(malaria_dir, 'input_parameters/', iso, '/', tag),
                        full.names= T)
 
 jobs<- obj$lapply(filepaths, run_malaria_model)
@@ -254,5 +271,5 @@ jobs<- obj$lapply(filepaths, run_malaria_model)
 
 
 # test if the jobs begin before launching on cluster
-model_input<- input[[1]]
-lapply(filepaths, run_malaria_model)
+filepath<- filepaths[[1]]
+lapply(filepath, run_malaria_model)

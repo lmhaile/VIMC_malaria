@@ -76,7 +76,8 @@ aggregate_outputs<- function(dt, interval, folder){
            iso, 
            site_name,
            urban_rural,
-           run,
+           scenario,
+           tag,
            contains("n_inc_clin"),   # clinical incidence
            contains("n_inc_severe"), # severe incidence
            contains("n_age")         # population
@@ -84,7 +85,7 @@ aggregate_outputs<- function(dt, interval, folder){
   
   dt<- dt |>
     tidyr::pivot_longer(
-      cols = -c("t", "ft", "iso", "site_name", "urban_rural", "run")
+      cols = -c("t", "ft", "iso", "site_name", "urban_rural", "scenario", 'tag')
     ) |>
     dplyr::mutate(
       name = stringr:: str_remove(.data$name, "_inc")
@@ -107,6 +108,7 @@ aggregate_outputs<- function(dt, interval, folder){
     ) 
   
   dt<- data.table(dt)
+  
   # transform age to years
   dt[, age_years_lower:= round(age_lower / 365)]
   dt[, age_years_upper:= round(age_upper / 365)]
@@ -117,7 +119,7 @@ aggregate_outputs<- function(dt, interval, folder){
   # for population, round population over the time period
   dt<- data.table(dt)
   
-  grouping<- c('t', 'iso', 'site_name', 'urban_rural', 'run', 'age_lower', 'age_upper', 'group')
+  grouping<- c('t', 'iso', 'site_name', 'urban_rural', 'scenario', 'tag', 'age_lower', 'age_upper', 'group')
   dt[group== 'clinical_incidence', val:= sum(value), by= grouping]
   dt[group== 'severe_incidence', val:= sum(value), by= grouping]
   dt[group== 'population', val:= round(mean(value)), by= grouping]
@@ -126,13 +128,11 @@ aggregate_outputs<- function(dt, interval, folder){
   
   dt<-  dt|>
     tidyr::pivot_wider(
-      id_cols = c("t", "ft", "iso", "age_years_lower", "age_years_upper", "site_name", "urban_rural", "run"),
+      id_cols = c("t", "ft", "iso", "age_years_lower", "age_years_upper", "site_name", "urban_rural", "scenario", "tag"),
       names_from = 'group',
       values_from = 'val'
     )
   
-  #  save output to folder
-  write_rds(dt, file= paste0(folder, 'aggregated_output_', site, '.RDS'))
   return(dt)
   
   message('completed aggregation')
@@ -226,7 +226,7 @@ calculate_deaths_ylls<- function(dt, cfr= 0.215, scaler= 0.57, lifespan= 63){
 #' @param severe_episode_length length of an episode of severe malaria 
 #' @param interval              period of time you are calculating YLDs for. This determines disease episode length.
 #' 
-#' Output: data table with columns 'ylds' and 'dalys'
+#' @returns data table with columns 'ylds' and 'dalys'
 
 calculate_ylds_dalys<- function(dt, 
                                 mild_dw= 0.006, 
@@ -267,13 +267,15 @@ reformat_vimc_outputs<- function(dt){
   dt<- dt |>
     mutate(disease = 'Malaria',
            country_name = iso,
-           country = iso) |>
+           country = iso,
+           t = t + 1999) |>
     rename(cohort_size = population,
            cases = clinical_incidence,
            dalys = daly,
            age = age_years_lower,
-           year = year) |>
-    select(disease, year, age, country, country_name, cohort_size, cases, dalys, deaths)
+           year = t,
+           description = tag) |>
+    select(disease, year, age, country, country_name, site_name, urban_rural, scenario, description, cohort_size, cases, dalys, deaths)
   
   return(dt)
 }

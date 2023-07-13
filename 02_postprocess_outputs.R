@@ -7,7 +7,6 @@
 rm(list= ls())
 
 # packages  --------------------------------------------------------------------
-
 library(tidyverse)
 library(furrr)
 library(data.table)
@@ -22,71 +21,63 @@ library(openxlsx)
 library(wesanderson)
 library(extrafont)
 library(malariasimulation)
-source("Q:/VIMC_malaria/VIMC_functions.R", echo=TRUE)
+
+# custom functions -------------------------------------------------------------
+source("Q:/VIMC_malaria/functions/postprocessing_functions.R", echo=TRUE)
 
 # directories ------------------------------------------------------------------
+
 drat::addRepo("malaria", "file:///f:/drat")
-code_dir<- 'Q:/VIMC_malaria/' #  directory where code is stored
-malaria_dir<- 'Q:/VIMC_files'      #  project directory where files are stored
+code_dir<- 'Q:/VIMC_malaria/'                   #  directory where code is stored
+malaria_dir<- 'Q:/VIMC/central_estimates/'      #  project directory where files are stored
 setwd('Q:/')
 
 
 # load in files  ---------------------------------------------------------------
-dir<- paste0(malaria_dir, 
-             '/central_estimates/baseline/') #directory where outputs are
-files<- list.files(dir, full.names = T)[1]
-bl<- rbindlist(lapply(files, readRDS), fill= T)
-
-dir<- paste0(malaria_dir, 
-             '/central_estimates/intervention/') #directory where outputs are
-files<- list.files(dir, full.names = T)
-intvn<- rbindlist(lapply(files, readRDS), fill= T)
-
-intvn<- intvn |>
-  mutate(run = 'intervention')
-
-bl<- bl |>
-  mutate(run = 'baseline')
-
-# drop the burn-in period from the data-set-- start with five years for now
-intvn<- drop_burnin(intvn, burnin= 5*365)
-bl<- drop_burnin(bl, burnin= 5*365)
+iso<- 'NGA'                                     # country you would like to process results for
+tag<- 'run_through_2020'                      # description of the model run you are carrying out
 
 
-# transform time into annual outputs
-intvn<- time_transform(x= intvn, time_divisor = 365, baseline_t = 0)
-bl<- time_transform(x= bl, time_divisor = 365, baseline_t = 0)
+# 
+file_dir<- paste0(malaria_dir, 'raw_model_output/', iso, '/', tag, '/')
+files<- list.files(file_dir, full.names= TRUE)[1]
+input<- rbindlist(lapply(files, readRDS))
+
+# dt <- get_rates(
+#   dt,
+#   time_divisor = 365,
+#   baseline_t = 0,
+#   age_divisor = 1,
+#   scaler = 0.215,
+#   treatment_scaler = 0.5,
+#   baseline_treatment = 0
+# )
+
+#dt <- drop_burnin(input, burnin= 5*365)                         # drop the burn-in period from the data-set
+dt <- time_transform(x= dt, time_divisor = 365, baseline_t = 0) # transform time into annual outputs
+dt <- aggregate_outputs(dt, interval= 365)                      # aggregate model outputs  
+dt <- calculate_deaths_ylls(dt)                                 # calculate deaths 
+dt <- calculate_ylds_dalys(dt)                                  # calculate DALYs
+dt <- reformat_vimc_outputs(dt)                                 # format outputs for submission
 
 
-# aggregate model outputs  -----------------------------------------------------
-# must be done at the site level first
-
-sites<- unique(list(intvn$site_name))
-
-test<- split(intvn, f = intvn$site_name)
-
-testing<- lapply(test, aggregate_outputs, interval= 365, sum_to_country= F)
+# check model output prevalence is similar to underlying prevalence for time period
+# Calculate prevalence
+dt<- copy(input)
+dt$prevalence <- dt$n_detect_730_3649 / dt$n_730_3649
 
 
-intvn<-aggregate_outputs(intvn, interval= 365)
-bl<-aggregate_outputs(bl, interval= 365)
+# Set the time
+dt$t <- (dt$timestep / 365) + 2000
 
+# Plot
+plot(dt$prevalence ~ dt$t, t = "l", ylim = c(0, 0.8), xlab = "Year", ylab = "Prevalence")
 
-# calculate deaths -------------------------------------------------------------
-intvn<- calculate_deaths_ylls(intvn)
-bl<- calculate_deaths_ylls(bl)
+# Add MAP prevalence
+points(site_data$prevalence$year + 0.5, site_data$prevalence$pfpr, pch = 19, col = "darkred")
 
+dev.off()
 
-# calculate DALYs --------------------------------------------------------------
-intvn<- calculate_ylds_dalys(intvn)
-bl<- calculate_ylds_dalys(bl)
-
-
-# format outputs  --------------------------------------------------------------
-intvn<- reformat_vimc_outputs(intvn)
-bl<- reformat_vimc_outputs(bl)
-
-
-# save output file to submission folder
+# save outputs
 write.csv(intvn, paste0(malaria_dir, '/output/central_burden_estimates/central_burden_vaccine.csv'))
 write.csv(bl, paste0(malaria_dir, '/output/central_burden_estimates/central_burden_baseline.csv'))

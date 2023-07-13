@@ -7,14 +7,14 @@
 
 #' Set vaccine coverage using scene package
 #'
-#' @param   terminal_year year you would like to expand intervention coverage out to 
+#' @param   site          site data file
 #' @param   change        would you like to set a certain coverage level? Boolean
+#' @param   terminal_year year you would like to expand intervention coverage out to 
 #' @param   rtss_target   data set with mortality inputs
 #' @param   rtss_year     year for target
-#' @param   site          site data file
 #' @returns site file with updated vaccine coverage values 
 
-set_vaccine_coverage<- function(site, change= TRUE, terminal_year, rtss_target, rtss_year){
+set_vaccine_coverage<- function(site, change, terminal_year, rtss_target, rtss_year){
   
   
   require(scene)
@@ -122,17 +122,17 @@ prep_inputs<- function(site_data, folder, population, min_ages, max_ages){
   output<- lapply(c(1:jobs), prep_site_data)
 }
 
+#' Prep inputs for batch launch for central burden estimate GAVI runs
+#'
+#' @param site_data  dataset with site files for country
+#' @param mort_dt    dataset with mortality inputs
+#' @param folder     folder to save input parameters
+#' @param population population to run the model on
+#' @returns list with site name, urban/rural grouping, iso code, and parameters to pass into cluster
+
 
 prep_inputs_rfp<- function(site_data, mort_dt, death_rate_matrix, folder){
   
-  #' Prep inputs for batch launch for central burden estimate GAVI runs
-  #'
-  #' @param site_data  dataset with site files for country
-  #' @param mort_dt    dataset with mortality inputs
-  #' @param folder     folder to save input parameters
-  #' @param population population to run the model on
-  #' @returns list with site name, urban/rural grouping, iso code, and parameters to pass into cluster
-
   
   # how many sites in this country?
   jobs<- nrow(site_data$sites)
@@ -215,5 +215,57 @@ prep_stochastic_inputs<- function(site, draws){
   output<- lapply(1:draws, format_stochastic_inputs)
   
   return(output)
+}
+
+#' Quick calibration for VIMC models using calibrate
+#' 
+#' @param site_data site file
+#' @returns calibrated EIR estimate
+
+
+quick_calibration<- function(site_data){
+  
+  require(cali)
+  
+  prev<- data.table(site_data$prevalence)
+  target_pfpr <- prev[year == 2007, pfpr]
+  
+  # Define our simulation parameters, we need to add $timesteps for the calibration
+  p <- malariasimulation::get_parameters(
+    overrides = list(
+      human_population = 5000,
+      individual_mosquitoes = FALSE
+    )
+  )
+  p$timesteps <- 7 * 365
+  
+  # Write our summary function. To match the target we need to
+  # output average PfPr in year 3
+  get_pfpr_year_3 <- function(simulation_output){
+    year3 <- simulation_output[simulation_output$timestep > 6 * 365,]
+    pfpr <- year3$n_detect_730_3650 / year3$n_730_3650
+    average_pfpr <- mean(pfpr)
+    return(average_pfpr)
+  }
+  
+  # Run a test simulation to check our target function does what it should!
+  simulation <- malariasimulation::run_simulation(
+    timesteps = p$timesteps,
+    parameters = p
+  )
+  # Does this look right? Does it match the type of target data?
+  get_pfpr_year_3(simulation)
+  
+  # When we are happy we can run the calibration
+  set.seed(1234)
+  calibration <- cali::calibrate(target = target_pfpr,
+                                 summary_function = get_pfpr_year_3,
+                                 parameters = p,
+                                 tolerance = 0.005,
+                                 low = 0.02, high = 20)
+  
+  message("Calibrated EIR estimate: ", calibration)
+  return(calibration)
+  
 }
 
