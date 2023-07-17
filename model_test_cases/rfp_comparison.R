@@ -11,6 +11,8 @@ library(wesanderson)
 library(ggplot2)
 library(ggforce)
 library(readr)
+library(postie)
+remotes::install_github('mrc-ide/postie')
 
 # directories ------------------------------------------------------------------
 dir<- 'Q:/VIMC_malaria_rfp/' #directory issue
@@ -234,8 +236,8 @@ inputs <- data.table(
       bl <- get_rates(
         bl,
         time_divisor = 365,
-        baseline_t = 0,
-        age_divisor = 1,
+        baseline_t = 1999,
+        age_divisor = 365,
         scaler = 0.215,
         treatment_scaler = 0.5,
         baseline_treatment = 0
@@ -244,48 +246,44 @@ inputs <- data.table(
       int <- get_rates(
         int,
         time_divisor = 365,
-        baseline_t = 0,
-        age_divisor = 1,
+        baseline_t = 1999,
+        age_divisor = 365,
         scaler = 0.215,
         treatment_scaler = 0.5,
         baseline_treatment = 0
       )
       
       bl<- bl |>
-        rename(year = t) |>
         mutate(identifier = baseline) |>
+        rename(year = t) |>
         rename(clinical_bl = clinical) |>
         mutate(age = as.numeric(age_lower)) |>
-        mutate(age = round(age/365)) |>
-        mutate(year= year + 1999) |>
-        select(identifier, year, age, clinical_bl)
+        select(identifier, year, age, clinical_bl, prop_n)
       
 
       int<- int |>
-        rename(year = t) |>
         mutate(identifier = intervention) |>
+        rename(year = t) |>
         rename(clinical_int = clinical) |>
         mutate(age = as.numeric(age_lower)) |>
-        mutate(age = round(age/365)) |>
-        mutate(year= year + 1999) |>
         select(identifier, year, age, clinical_int)
 
-      
       dt <-
         merge(bl, int, by = c('age', 'year'))
       
       dt <-
         merge(dt, pop, by = c('age', 'year'))
       
+      
       dt <- dt |>
-        mutate(cases_bl = cohort_size * clinical_bl,
-               cases_int = cohort_size * clinical_int)
+        mutate(cases_bl = 100000 * prop_n* clinical_bl,
+               cases_int = 100000 * prop_n* clinical_int)
       
       dt <- dt |>
         mutate(cases_averted = cases_bl - cases_int)
       
       dt<- data.table(dt)
-      dt<- dt[year > 2039]
+      dt<- dt[year > 2035]
       dt<- dt[, cases_averted:= sum(cases_averted), by= c('age')]
       dt<- unique(dt, by= c('age'))
     }
@@ -293,17 +291,18 @@ inputs <- data.table(
   # generate plot
   p<- ggplot(dt[age < 16], mapping= aes(x= age, y= cases_averted/1000))+
     geom_bar(stat= 'identity', fill= '#2556B896')+
+    ylim(-10, 40) +
     labs(y= 'Cases averted (in thousands)',
          x= 'Age (in years)',
-         title= paste0('Cases averted by age, 2040-2050: ', tag))
+         title= paste0('Cases averted by age, 2035-2050: ', tag))
   
   
   return(p)
   }
 
 # test function on inputs of different PFPR
-  baseline<- inputs[5]$identifier
-  intervention<- inputs[6]$identifier
+  baseline<- inputs[7]$identifier
+  intervention<- inputs[8]$identifier
   
   pdf('Q:/VIMC_files/plots/cases_averted_plots_update.pdf', width= 12, height= 10)
   cases_averted_plot(baseline= inputs[7]$identifier,

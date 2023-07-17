@@ -35,7 +35,7 @@ setwd('Q:/')
 
 # load in files  ---------------------------------------------------------------
 iso<- 'NGA'                                     # country you would like to process results for
-tag<- 'run_through_2020'                      # description of the model run you are carrying out
+tag<- 'no_changes_in_settings'                      # description of the model run you are carrying out
 
 
 # 
@@ -64,6 +64,7 @@ dt <- reformat_vimc_outputs(dt)                                 # format outputs
 # check model output prevalence is similar to underlying prevalence for time period
 # Calculate prevalence
 dt<- copy(input)
+prevalence<- site$prevalence
 dt$prevalence <- dt$n_detect_730_3649 / dt$n_730_3649
 
 
