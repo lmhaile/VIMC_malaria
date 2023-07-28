@@ -21,12 +21,17 @@ library(openxlsx)
 library(wesanderson)
 library(extrafont)
 library(malariasimulation)
+library(ggplot2)
+library(ggthemes)
+library(ggforce)
+#install.packages('Q:/postie_0.1.2.tar.gz')
+library(postie)
+
 
 # custom functions -------------------------------------------------------------
-source("Q:/VIMC_malaria/functions/postprocessing_functions.R", echo=TRUE)
+#source("Q:/VIMC_malaria/functions/postprocessing_functions.R", echo=TRUE)
 
 # directories ------------------------------------------------------------------
-
 drat::addRepo("malaria", "file:///f:/drat")
 code_dir<- 'Q:/VIMC_malaria/'                   #  directory where code is stored
 malaria_dir<- 'Q:/VIMC/central_estimates/'      #  project directory where files are stored
@@ -34,51 +39,153 @@ setwd('Q:/')
 
 
 # load in files  ---------------------------------------------------------------
-iso<- 'NGA'                                     # country you would like to process results for
-tag<- 'no_changes_in_settings'                      # description of the model run you are carrying out
+iso<- 'NGA'
+descrip<- 'no_changes_in_settings'
+
+# make directories to save outputs to
+raw_dir<- paste0(malaria_dir, 'raw_model_output/',  iso, '/', descrip, '/')
+output_dir<- paste0(malaria_dir, 'processed_output/',  iso, '/', descrip, '/')
+
+if(dir.exists(output_dir)== FALSE){
+  dir.create(output_dir, recursive = T)
+}
+
+# directory where output files are  --------------------------------------------
+files<- list.files(raw_dir, full.names= TRUE)
+
+# generate cases, deaths, and dalys at the site level
+output <- rbindlist(lapply(files, generate_vimc_output))                              
+#write_rds(output, file= paste0(output_dir, 'site_level_output.RDS'))
+
+# sum cases, deaths, and dalys to the country level
+# aggregate<- aggregate_output(output)
+# write_rds(aggregate, file= paste0(output_dir, 'country_level_output.RDS'))
+
+# format for final submission
+# final_output<- format_for_submission(aggregate)
+# writeRDS(aggregate, file= paste0(output_dir, 'final_output.RDS'))
+
+# diagnostics for a single site ------------------------------------------------
+#plot_model_against_prevalence(input)
+
+population_diagnostic(output)
+incident_cases_diagnostic(output)
+incidence_rate_diagnostic(output)
+mortality_diagnostic(output)
+mortality_rate_diagnostic(output)
+daly_diagnostic(output)
 
 
-# 
-file_dir<- paste0(malaria_dir, 'raw_model_output/', iso, '/', tag, '/')
-files<- list.files(file_dir, full.names= TRUE)[1]
-input<- rbindlist(lapply(files, readRDS))
+# diagnostics for a single site  --------------------------------------------
+population_diagnostic<- function(dt){
+  
+  p<-   ggplot(data= dt, mapping = aes(x= year, y= cohort_size, color= scenario, fill= scenario))+
+    geom_point(alpha= 0.5)  +
+    facet_wrap_paginate(~age) +
+    labs(x= 'Time (in years)', y= 'Population', title= paste0('Population over time: site ', unique(dt$site_name)),
+         color= 'Scenario', fill= 'Scenario') +
+    theme_minimal()+
+    theme(text= element_text(family= 'Arial Narrow')) +
+    scale_color_manual(values= wes_palette('Royal2', n= 2)) +
+    scale_fill_manual(values= wes_palette('Royal2', n= 2)) 
+  
+  return(p)
+  
+}
 
-# dt <- get_rates(
-#   dt,
-#   time_divisor = 365,
-#   baseline_t = 0,
-#   age_divisor = 1,
-#   scaler = 0.215,
-#   treatment_scaler = 0.5,
-#   baseline_treatment = 0
-# )
+incident_cases_diagnostic<- function(dt){
+  
+  p<-   ggplot(data= dt, mapping = aes(x= year, y= cases, color= scenario, fill= scenario))+
+    geom_point(alpha= 0.5)  +
+    facet_wrap_paginate(~age, scales= 'free') +
+    labs(x= 'Time (in years)', y= 'Clinical cases', title= paste0('Incident clinical cases over time: site ', unique(dt$site_name)),
+         color= 'Scenario', fill= 'Scenario') +
+    theme_minimal()+
+    theme(text= element_text(family= 'Arial Narrow')) +
+    scale_color_manual(values= wes_palette('Royal2', n= 2)) +
+    scale_fill_manual(values= wes_palette('Royal2', n= 2)) 
+  
+  return(p)
+  
+}
 
-#dt <- drop_burnin(input, burnin= 5*365)                         # drop the burn-in period from the data-set
-dt <- time_transform(x= dt, time_divisor = 365, baseline_t = 0) # transform time into annual outputs
-dt <- aggregate_outputs(dt, interval= 365)                      # aggregate model outputs  
-dt <- calculate_deaths_ylls(dt)                                 # calculate deaths 
-dt <- calculate_ylds_dalys(dt)                                  # calculate DALYs
-dt <- reformat_vimc_outputs(dt)                                 # format outputs for submission
+incidence_rate_diagnostic<- function(dt){
+  
+  p<-  ggplot(data= dt, mapping = aes(x= year, y= clinical, color= scenario, fill= scenario))+
+    geom_point(alpha= 0.5)  +
+    facet_wrap_paginate(~age, 
+                        scales = 'free') +
+    labs(x= 'Time (in years)', y= 'Incidence rate', title= paste0('Incidence rate over time: ', unique(dt$site_name)),
+         color= 'Scenario', fill= 'Scenario') +
+    theme_minimal()+
+    theme(text= element_text(family= 'Arial')) +
+    scale_color_manual(values= wes_palette('Royal2', n= 2)) +
+    scale_fill_manual(values= wes_palette('Royal2', n= 2)) 
+  
+  return(p)
+}
 
 
-# check model output prevalence is similar to underlying prevalence for time period
-# Calculate prevalence
-dt<- copy(input)
-prevalence<- site$prevalence
-dt$prevalence <- dt$n_detect_730_3649 / dt$n_730_3649
+
+mortality_diagnostic<- function(dt){
+  
+  p<- ggplot(data= dt, mapping = aes(x= year, y= deaths, color= scenario, fill= scenario))+
+    geom_point(alpha= 0.5)  +
+    facet_wrap_paginate(~age, 
+                        scales = 'free') +
+    labs(x= 'Time (in years)', y= 'Deaths', title= paste0('Deaths over time: ', unique(output$site_name)),
+         color= 'Scenario', fill= 'Scenario') +
+    theme_minimal()+
+    theme(text= element_text(family= 'Arial')) +
+    scale_color_manual(values= wes_palette('Royal2', n= 2)) +
+    scale_fill_manual(values= wes_palette('Royal2', n= 2)) 
+  
+  return(p)
+  
+}
+mortality_rate_diagnostic<- function(dt){
+  
+  p<- ggplot(data= dt, mapping = aes(x= year, y= mortality, color= scenario, fill= scenario))+
+    geom_point(alpha= 0.5)  +
+    facet_wrap_paginate(~age, 
+                        scales = 'free') +
+    labs(x= 'Time (in years)', y= 'Mortality rate', title= paste0('Mortality rate over time: ', unique(output$site_name)),
+         color= 'Scenario', fill= 'Scenario') +
+    theme_minimal()+
+    theme(text= element_text(family= 'Arial')) +
+    scale_color_manual(values= wes_palette('Royal2', n= 2)) +
+    scale_fill_manual(values= wes_palette('Royal2', n= 2)) 
+  
+  return(p)
+  
+}
 
 
-# Set the time
-dt$t <- (dt$timestep / 365) + 2000
+daly_diagnostic<- function(dt){
+  
+  p<- ggplot(data= dt, mapping = aes(x= year, y= dalys, color= scenario, fill= scenario))+
+    geom_point(alpha= 0.5)  +
+    facet_wrap(~age, 
+               scales = 'free') +
+    labs(x= 'Time (in years)', y= 'DALYs', title= paste0('DALYs over time: ', unique(dt$site_name)),
+         color= 'Scenario', fill= 'Scenario') +
+    theme_minimal()+
+    theme(text= element_text(family= 'Arial')) +
+    scale_color_manual(values= wes_palette('Royal2', n= 2)) +
+    scale_fill_manual(values= wes_palette('Royal2', n= 2)) 
+  
+  return(p)
+}
 
-# Plot
-plot(dt$prevalence ~ dt$t, t = "l", ylim = c(0, 0.8), xlab = "Year", ylab = "Prevalence")
 
-# Add MAP prevalence
-points(site_data$prevalence$year + 0.5, site_data$prevalence$pfpr, pch = 19, col = "darkred")
 
-dev.off()
+cases_averted_diagnostic<- function(dt){
+  
+  
+  
+}
 
 # save outputs
-write.csv(intvn, paste0(malaria_dir, '/output/central_burden_estimates/central_burden_vaccine.csv'))
-write.csv(bl, paste0(malaria_dir, '/output/central_burden_estimates/central_burden_baseline.csv'))
+#write.csv(intvn, paste0(malaria_dir, '/output/central_burden_estimates/central_burden_vaccine.csv'))
+#write.csv(bl, paste0(malaria_dir, '/output/central_burden_estimates/central_burden_baseline.csv'))
+

@@ -19,7 +19,7 @@ run_malaria_model<- function(filepath, custom_time) {
   
 
   scenario<- model_input$scenario
-  tag<- model_input$tag
+  description<- model_input$description
   iso<- model_input$iso
 
   timesteps<<- model_input$param_list$timesteps
@@ -33,7 +33,7 @@ run_malaria_model<- function(filepath, custom_time) {
   model[, site_name:= model_input$site_name]
   model[, urban_rural:= model_input$ur]
   model[, iso:= model_input$iso]
-  model[, tag:= model_input$tag]
+  model[, description:= model_input$description]
   model[, scenario:= model_input$scenario]
   
   
@@ -42,9 +42,9 @@ run_malaria_model<- function(filepath, custom_time) {
     dir.create(paste0('Q:/VIMC/central_estimates/raw_model_output/', iso, '/'))
   }
   
-  if(dir.exists(paste0('Q:/VIMC/central_estimates/raw_model_output/', iso, '/', tag))== FALSE) {
+  if(dir.exists(paste0('Q:/VIMC/central_estimates/raw_model_output/', iso, '/', description))== FALSE) {
     
-    dir.create(paste0('Q:/VIMC/central_estimates/raw_model_output/', iso, '/', tag))
+    dir.create(paste0('Q:/VIMC/central_estimates/raw_model_output/', iso, '/', description))
     
   }
   
@@ -53,7 +53,7 @@ run_malaria_model<- function(filepath, custom_time) {
   message('saving the model')
   saveRDS(model, file= paste0('Q:/VIMC/central_estimates/raw_model_output/', 
                               iso, '/',
-                              tag, '/',
+                              description, '/',
                               model_input$site_name, '_',
                               model_input$ur, '_',
                               model_input$iso, '_', 

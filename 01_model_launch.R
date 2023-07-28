@@ -1,13 +1,15 @@
-#############################################################
+################################################################################
 ##  title   01_model_launch
 ##  author  Lydia Haile
 ##  purpose parameterize models and launch on HPC cluster
-#############################################################
+################################################################################
 
 rm(list= ls())
 
+setwd('Q:/')
 # packages  --------------------------------------------------------------------
-install.packages('Q:/site_0.2.2.tar.gz')
+#install.packages('Q:/site_0.2.2.tar.gz')
+
 library(scene)
 library(tidyverse)
 library(furrr)
@@ -24,13 +26,12 @@ library(openxlsx)
 library(wesanderson)
 library(extrafont)
 library(malariasimulation)
-drat::addRepo("malariaverse", "file:\\\\projects.dide.ic.ac.uk/malaria/malariaverse/drat")
 
+#drat::addRepo("malariaverse", "file:\\\\projects.dide.ic.ac.uk/malaria/malariaverse/drat")
 
 # custom functions to source  --------------------------------------------------
 source("Q:/VIMC_malaria/functions/parameterizing_functions.R")
 source("Q:/VIMC_malaria/functions/modelling_functions.R")
-
 
 # directories ------------------------------------------------------------------
 drat::addRepo("malaria", "file:///f:/drat")
@@ -69,11 +70,9 @@ mort[age_upper== 121, age_upper:= 200]
 mort<- mort |>
   select(iso3c, country, age_upper, year, mortality_rate)
 
-
-cluster<- FALSE #launch on cluster? 
-
-
 # plot initial intervention coverage  -----------------------------------------------
+site_data<- foresite::NGA
+
 plot_interventions_combined(
   interventions = site_data$interventions,
   population = site_data$population,
@@ -84,40 +83,39 @@ plot_interventions_combined(
 
 
 year<- 365
+iso<- 'NGA'
+descrip<- 'single_year_age_groups'
+cluster<- TRUE #launch on cluster? 
 
 # for large scale runs of full countries  --------------------------------------
-iso<- 'MWI'
-descrip<- 'run_site_from_rfp_small_population'
-
-for (iso in isos){
+#for (iso in isos){
   prep_country(iso,
-               scenario= 'baseline', 
+               scenario= 'intervention', 
                vimc_mortality= TRUE,
-               min_ages = c(seq(0, 14, by= 1), seq(15, 80, by= 15)) * year,
-               max_ages = c(seq(1, 15, by= 1), seq(30, 95, by= 15)) * year -1,
-               population = 5000,
+               min_ages = c(seq(0, 99, by= 1)) * year,
+               max_ages = c(seq(1, 100, by= 1)) * year -1,
+               population = 50000,
                description= descrip)
-}
+#}
 
 
 # for single site test runs ----------------------------------------------------
-site_data<- foresite::MWI
+site_data<- foresite::NGA
 site_data<- site::single_site(site_data, 2)
 
 prep_site(site_data,
-          scenario= 'baseline', 
+          scenario= 'intervention', 
           vimc_mortality= TRUE,
           min_ages = c(seq(0, 14, by= 1), seq(15, 80, by= 15)) * year,
           max_ages = c(seq(1, 15, by= 1), seq(30, 95, by= 15)) * year -1,
-          population = 5000,
+          population = 1000,
           description= descrip)
 
-
-
-# submit jobs ------------------------------------------------------------------
 filepaths<- list.files(paste0(malaria_dir, 'input_parameters/', iso, '/', descrip),
                        full.names= T)
+filepaths<- filepaths[filepaths %like% 'intervention']
 
+# submit jobs to cluster -------------------------------------------------------
 if (cluster== TRUE){
   packages<- c('dplyr', 'tidyr', 'data.table', 'malariasimulation')
   src <- conan::conan_sources("github::mrc-ide/malariasimulation")
@@ -146,7 +144,6 @@ if (cluster== TRUE){
   jobs<- obj$lapply(filepaths, run_malaria_model)
   
 }
-
 
 # or launch a model locally  ---------------------------------------------------
 filepath<- filepaths[[1]]

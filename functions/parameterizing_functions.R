@@ -1,9 +1,8 @@
-######################################################
+################################################################################
 ## title    Parameterization functions
 ## author   Lydia Haile
 ## purpose  functions used to paramaterize VIMC model runs. Includes:
-##            
-######################################################
+################################################################################
 
 #' Set vaccine coverage using scene package
 #'
@@ -13,7 +12,11 @@
 #' @param   rtss_target   data set with mortality inputs
 #' @param   rtss_year     year for target
 #' @returns site file with updated vaccine coverage values 
-set_vaccine_coverage<- function(site, scenario, terminal_year, rtss_target, rtss_year){
+set_vaccine_coverage<- function(site, 
+                                scenario, 
+                                terminal_year, 
+                                rtss_target,
+                                rtss_year){
   
   require(scene)
   group_var <- names(site$sites)
@@ -24,6 +27,7 @@ set_vaccine_coverage<- function(site, scenario, terminal_year, rtss_target, rtss
                          group_var = group_var)
   
   if (scenario== 'intervention'){
+    
     site$interventions <- site$interventions |>
       set_change_point(sites = site$sites, 
                        var = "rtss_cov", 
@@ -65,19 +69,37 @@ set_vimc_mortality<- function(site){
 #' @param   description                description of model runs you would like to carry out
 #' @inheritParams set_vaccine_coverage
 #' @returns list with input parameters and demographic info, as inputs for run_malaria_model
-prep_site<- function(site, vimc_mortality, population, scenario, min_ages, max_ages, description){
+prep_site<- function(site,
+                     save_dir= 'Q:/VIMC/central_estimates/input_parameters/',
+                     vimc_mortality, 
+                     population, 
+                     scenario, 
+                     min_ages, 
+                     max_ages, 
+                     description){
   
   # get site info
   site_name<- site$sites$name_1
   ur<- site$sites$urban_rural
   iso<- site$sites$iso3c
   
+  
+  # create directories to save outputs  -------
+  if(dir.exists(paste0(save_dir, iso))== FALSE){
+    dir.create(paste0(save_dir, iso))
+  }
+  
+  if(dir.exists(paste0(save_dir, iso, '/', description))== FALSE){
+    dir.create(paste0(save_dir, iso, '/', description))
+  }
+  
   message(paste0('prepping inputs for site ', site_name, ' ', ur))
   
   if(vimc_mortality== TRUE){
-  set_vimc_mortality(site)
+  site<- set_vimc_mortality(site)
   }
 
+  if (scenario== 'baseline'){
     # # expand scenario out to 2050
     site <- set_vaccine_coverage(
       site,
@@ -86,7 +108,15 @@ prep_site<- function(site, vimc_mortality, population, scenario, min_ages, max_a
       rtss_target = NULL,
       rtss_year = NULL
     )
-    
+  } else {
+    site <- set_vaccine_coverage(
+      site,
+      scenario = scenario,
+      terminal_year = 2050,
+      rtss_target = 0.8,
+      rtss_year = 2023
+    )
+  }
   # pull parameters for this site
   params<- site::site_parameters(
     interventions = site$interventions,
@@ -128,7 +158,8 @@ prep_site<- function(site, vimc_mortality, population, scenario, min_ages, max_a
            iso, '/', 
            description, '/', 
            site_name, '_', 
-           ur, '_', scenario,
+           ur, '_', 
+           scenario,
            '.rds'
     )
   )
@@ -170,139 +201,21 @@ prep_country<- function(iso,
   sites<- nrow(site_data$sites)
   
   for(num in c(1:sites)){
-    message(paste0('prepping site ',num))
+    message(paste0('prepping site ', num))
     
     site<- site::single_site(site_file= site_data, index= num) 
-    prep_site(site, vimc_mortality, scenario, population= population, min_ages, max_ages, description)
+    prep_site(site, 
+              vimc_mortality= vimc_mortality, 
+              scenario= scenario, 
+              population= population, 
+              min_ages= min_ages, 
+              max_ages= max_ages, 
+              description= description)
     
   }
   
 return(message(paste0('prepped outputs for model run: ', description, ', country: ', iso)))
   
-}
-
-#' Prep inputs for batch launch for central burden estimate GAVI runs
-#'
-#' @param site_data  dataset with site files for country
-#' @param folder     folder to save input parameters
-#' @param population population to run the model on
-#' @param min_ages   minimum ages
-#' @param max_ages   maximum ages
-#' @returns list with site name, urban/rural grouping, iso code, and parameters to pass into cluster 
-prep_inputs<- function(site_data, folder, population, min_ages, max_ages){
-  
-  
-  # how many sites in this country?
-  jobs<- nrow(site_data$sites)
-  
-  message(paste0('prepping ', jobs, ' jobs for model launch'))
-  
-  prep_site_data<- function(num){
-    site<- site::single_site(site_file= site_data, index= num) 
-    
-    ## get site info
-    site_name<- site$sites$name_1
-    ur<- site$sites$urban_rural
-    iso<- site$sites$iso3c
-    message(paste0('prepping inputs for site ', site_name, ' ', ur))
-    
-    # pull parameters for this site
-    params<- site::site_parameters(
-      interventions = site$interventions,
-      demography = site$demography,
-      vectors = site$vectors,
-      seasonality = site$seasonality,
-      eir= site$eir$eir[1],
-      overrides = list(human_population= population),
-      burnin = 5* 365
-    )
-    
-    year<- 365
-    # Set clinical incidence rendering
-    params$clinical_incidence_rendering_min_ages = min_ages 
-    params$clinical_incidence_rendering_max_ages = max_ages
-    
-    # Set severe incidence rendering
-    params$severe_incidence_rendering_min_ages = min_ages 
-    params$severe_incidence_rendering_max_ages = max_ages 
-    
-    # Set clinical incidence rendering
-    params$clinical_incidence_rendering_min_ages =  min_ages
-    params$clinical_incidence_rendering_max_ages = max_ages 
-    
-    # Set age group rendering
-    params$age_group_rendering_min_ages = min_ages 
-    params$age_group_rendering_max_ages = max_ages 
-    
-    inputs<- list('param_list'= params, 'site_name'= site_name, 'ur'= ur, 'iso'= iso)
-    
-    write_rds(inputs, paste0(folder, 'input_parameters/', site_name, '_', ur, '_', iso, '.rds'))
-    
-    print('saved input')
-    
-    return(paste0(site_name, '_', ur, '_', iso))
-  }
-  output<- lapply(c(1:jobs), prep_site_data)
-}
-
-#' Prep inputs for batch launch for central burden estimate GAVI runs
-#'
-#' @param site_data  dataset with site files for country
-#' @param mort_dt    dataset with mortality inputs
-#' @param folder     folder to save input parameters
-#' @param population population to run the model on
-#' @returns list with site name, urban/rural grouping, iso code, and parameters to pass into cluster
-prep_inputs_rfp<- function(site_data, mort_dt, death_rate_matrix, folder){
-  
-  
-  # how many sites in this country?
-  jobs<- nrow(site_data$sites)
-  
-  message(paste0('prepping ', jobs, ' jobs for model launch'))
-  
-  prep_site_data<- function(num){
-    site<- site::single_site(site_file= site_data, index= num) 
-    
-    ## get site info
-    site_name<- site$sites$name_1
-    ur<- site$sites$urban_rural
-    iso<- site$sites$iso3c
-    message(paste0('prepping inputs for site ', site_name, ' ', ur))
-    
-    # pull parameters for this site
-    params<- site::site_parameters(
-      interventions = site$interventions,
-      demography = site$demography,
-      vectors = site$vectors,
-      seasonality = site$seasonality,
-      eir= site$eir$eir[1],
-      overrides = list(human_population= 5000),
-      burnin = 5* 365
-    )
-    
-    year<- 365
-    # Set clinical incidence rendering
-    params$clinical_incidence_rendering_min_ages = c(seq(0, 99, by = 1))*year
-    params$clinical_incidence_rendering_max_ages = c(seq(1, 99, by = 1)*year -1, 36500)
-    
-    # Set severe incidence rendering
-    params$severe_incidence_rendering_min_ages = c(seq(0, 99, by = 1))*year
-    params$severe_incidence_rendering_max_ages = c(seq(1, 99, by = 1)*year -1, 36500)
-    
-    # Set clinical incidence rendering
-    params$clinical_incidence_rendering_min_ages = c(seq(0, 99, by = 1))*year
-    params$clinical_incidence_rendering_max_ages = c(seq(1, 99, by = 1)*year -1, 36500)
-    
-    # Set age group rendering
-    params$age_group_rendering_min_ages = c(seq(0, 99, by = 1))*year
-    
-    inputs<- list('param_list'= params, 'site_name'= site_name, 'ur'= ur, 'iso'= iso)
-    
-    write_rds(inputs, paste0(folder, 'input_parameters/', site_name, '_', ur, '_', iso, '.rds'))
-    
-    return(paste0(site_name, '_', ur, '_', iso))
-  }
-  output<- lapply(c(1:jobs), prep_site_data)
 }
 
 
