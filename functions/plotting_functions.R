@@ -5,6 +5,21 @@
 ######################################################
 
 
+demography_diagnostic<- function(site_data){
+  
+  dt<- site_data$demography
+  
+  p<- ggplot(data= dt, mapping= aes(x= age_upper, y= mortality_rate))+
+    geom_point()+
+    labs(title= 'Mortality rate range for site',
+         xlab= 'age', 
+         ylab= 'mortality rate') +
+    theme_minimal()
+  
+  return(p)
+}
+
+
 #  write up model diagnostics for test site  -----------------------------------
 #' Plot model PFPR against prevalence 
 #'

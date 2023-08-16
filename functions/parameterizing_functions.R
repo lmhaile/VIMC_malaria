@@ -50,10 +50,10 @@ set_vaccine_coverage<- function(site,
 }
 
 
-set_vimc_mortality<- function(site){
+set_vimc_mortality<- function(site, mortality_input){
   # bind on a year for youngest age group
   youngest<- data.table(site$demography)[age_upper== min(site$demography$age_upper)]
-  mort_dt<- rbind(youngest, mort)
+  mort_dt<- rbind(youngest, mortality_input)
   site$demography<- mort_dt
   
   return(site)
@@ -62,6 +62,7 @@ set_vimc_mortality<- function(site){
 #'
 #' @param   site               site file for one site
 #' @param   mortality          if TRUE, incorporate VIMC mortality inputs
+#' @param   mortality_input    VIMC mortality input
 #' @param   population         human population  value
 #' @param   scenario           'baseline' or 'intervention'
 #' @param   min_ages           minimum ages (in timesteps) for incidence/ prevalence outputs
@@ -71,7 +72,8 @@ set_vimc_mortality<- function(site){
 #' @returns list with input parameters and demographic info, as inputs for run_malaria_model
 prep_site<- function(site,
                      save_dir= 'Q:/VIMC/central_estimates/input_parameters/',
-                     vimc_mortality, 
+                     vimc_mortality,
+                     mortality_input,
                      population, 
                      scenario, 
                      min_ages, 
@@ -96,7 +98,8 @@ prep_site<- function(site,
   message(paste0('prepping inputs for site ', site_name, ' ', ur))
   
   if(vimc_mortality== TRUE){
-  site<- set_vimc_mortality(site)
+  site<- set_vimc_mortality(site, 
+                            mortality_input = mortality_input)
   }
 
   if (scenario== 'baseline'){
@@ -179,6 +182,7 @@ prep_site<- function(site,
 prep_country<- function(iso, 
                         save_dir= 'Q:/VIMC/central_estimates/input_parameters/',
                         vimc_mortality,
+                        mortality_input,
                         population,
                         scenario, 
                         min_ages, 
@@ -206,6 +210,7 @@ prep_country<- function(iso,
     site<- site::single_site(site_file= site_data, index= num) 
     prep_site(site, 
               vimc_mortality= vimc_mortality, 
+              mortality_input = mortality_input,
               scenario= scenario, 
               population= population, 
               min_ages= min_ages, 

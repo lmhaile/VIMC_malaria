@@ -5,11 +5,9 @@
 ################################################################################
 
 rm(list= ls())
-
 setwd('Q:/')
-# packages  --------------------------------------------------------------------
-#install.packages('Q:/site_0.2.2.tar.gz')
 
+# packages  --------------------------------------------------------------------
 library(scene)
 library(tidyverse)
 library(furrr)
@@ -73,18 +71,9 @@ mort<- mort |>
 # plot initial intervention coverage  -----------------------------------------------
 site_data<- foresite::NGA
 
-plot_interventions_combined(
-  interventions = site_data$interventions,
-  population = site_data$population,
-  group_var = c("country", "name_1"),
-  include = c("itn_use", "itn_input_dist", "tx_cov", "smc_cov", "pmc_cov"),
-  labels = c("ITN usage", "ITN model input", "Treatment","SMC", "PMC")
-)
-
-
 year<- 365
 iso<- 'NGA'
-descrip<- 'single_year_age_groups'
+descrip<- 'fixed_demography_test_run'
 cluster<- TRUE #launch on cluster? 
 
 # for large scale runs of full countries  --------------------------------------
@@ -92,11 +81,17 @@ cluster<- TRUE #launch on cluster?
   prep_country(iso,
                scenario= 'intervention', 
                vimc_mortality= TRUE,
-               min_ages = c(seq(0, 99, by= 1)) * year,
-               max_ages = c(seq(1, 100, by= 1)) * year -1,
-               population = 50000,
+               mortality_input = mort,
+               min_ages = c(seq(0, 14, by= 1), seq(15, 80, by= 15)) * year,
+               max_ages = c(seq(1, 15, by= 1), seq(30, 95, by= 15)) * year -1,
+               population = 10000,
                description= descrip)
 #}
+
+
+
+
+# plot demography
 
 
 # for single site test runs ----------------------------------------------------
@@ -106,16 +101,20 @@ site_data<- site::single_site(site_data, 2)
 prep_site(site_data,
           scenario= 'intervention', 
           vimc_mortality= TRUE,
+          mortality_input = mort,
           min_ages = c(seq(0, 14, by= 1), seq(15, 80, by= 15)) * year,
           max_ages = c(seq(1, 15, by= 1), seq(30, 95, by= 15)) * year -1,
-          population = 1000,
+          population = 10000,
           description= descrip)
 
+
+demography_diagnostic(site_data)
+demography_diagnostic(site)
+# submit jobs to cluster -------------------------------------------------------
 filepaths<- list.files(paste0(malaria_dir, 'input_parameters/', iso, '/', descrip),
                        full.names= T)
-filepaths<- filepaths[filepaths %like% 'intervention']
 
-# submit jobs to cluster -------------------------------------------------------
+filepaths<- filepaths[1:10]
 if (cluster== TRUE){
   packages<- c('dplyr', 'tidyr', 'data.table', 'malariasimulation')
   src <- conan::conan_sources("github::mrc-ide/malariasimulation")
@@ -149,6 +148,18 @@ if (cluster== TRUE){
 filepath<- filepaths[[1]]
 lapply(filepath, run_malaria_model)
 
+
+
+
+
+# diagnostics ------------------------------------------------------------------
+plot_interventions_combined(
+  interventions = site_data$interventions,
+  population = site_data$population,
+  group_var = c("country", "name_1"),
+  include = c("itn_use", "itn_input_dist", "tx_cov", "smc_cov", "pmc_cov"),
+  labels = c("ITN usage", "ITN model input", "Treatment","SMC", "PMC")
+)
 
 
 
