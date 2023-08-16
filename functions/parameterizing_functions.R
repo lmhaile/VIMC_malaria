@@ -18,18 +18,17 @@ set_vaccine_coverage<- function(site,
                                 rtss_target,
                                 rtss_year){
   
-  require(scene)
   group_var <- names(site$sites)
   
   # expand intervention years --------------------------------------------------
   site$interventions <- site$interventions |>
-    expand_interventions(max_year = terminal_year,
+    scene::expand_interventions(max_year = terminal_year,
                          group_var = group_var)
   
   if (scenario== 'intervention'){
     
     site$interventions <- site$interventions |>
-      set_change_point(sites = site$sites, 
+      scene::set_change_point(sites = site$sites, 
                        var = "rtss_cov", 
                        year = rtss_year, 
                        target = rtss_target)
@@ -37,14 +36,15 @@ set_vaccine_coverage<- function(site,
     # Linear scale up of coverage
     # if you would like coverage to scale up to a certain target
     site$interventions <- site$interventions |>
-      linear_interpolate(vars = c("itn_use", "pmc_cov", "smc_cov", "rtss_cov"), 
+      scene::linear_interpolate(vars = c("itn_use", "pmc_cov", "smc_cov", "rtss_cov"), 
                          group_var = group_var)
   }
   
   site$interventions <- site$interventions |>
-    fill_extrapolate(group_var = group_var)
+    scene::fill_extrapolate(group_var = group_var)
+  
   site$interventions <- site$interventions |>
-    add_future_net_dist(group_var = group_var)
+    scene::add_future_net_dist(group_var = group_var)
   
   return(site)
 }
@@ -97,11 +97,13 @@ prep_site<- function(site,
   
   message(paste0('prepping inputs for site ', site_name, ' ', ur))
   
+  message('setting mortality')
   if(vimc_mortality== TRUE){
   site<- set_vimc_mortality(site, 
                             mortality_input = mortality_input)
   }
 
+  message('setting coverage')
   if (scenario== 'baseline'){
     # # expand scenario out to 2050
     site <- set_vaccine_coverage(
@@ -120,6 +122,8 @@ prep_site<- function(site,
       rtss_year = 2023
     )
   }
+  
+  message('formatting')
   # pull parameters for this site
   params<- site::site_parameters(
     interventions = site$interventions,
@@ -155,9 +159,10 @@ prep_site<- function(site,
                 'scenario'= scenario,
                 'description'= description)
   
+  message('saving')
   write_rds(
     inputs,
-    paste0('Q:/VIMC/central_estimates/input_parameters/',
+    paste0(save_dir,
            iso, '/', 
            description, '/', 
            site_name, '_', 

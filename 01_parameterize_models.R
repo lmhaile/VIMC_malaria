@@ -24,9 +24,8 @@ library(openxlsx)
 library(wesanderson)
 library(extrafont)
 library(malariasimulation)
-
-#drat::addRepo("malariaverse", "file:\\\\projects.dide.ic.ac.uk/malaria/malariaverse/drat")
-
+drat::addRepo("malariaverse", "file:\\\\projects.dide.ic.ac.uk/malaria/malariaverse/drat")
+install.packages("foresite", type = "source") # v0.1.0
 # custom functions to source  --------------------------------------------------
 source("functions/parameterizing_functions.R")
 source("functions/modelling_functions.R")
@@ -79,6 +78,32 @@ cluster<- TRUE #launch on cluster?
 # for large scale runs of full countries  --------------------------------------
 
 # launch parameterization on cluster
+packages<- c('dplyr', 'tidyr', 'data.table', 'malariasimulation', 'foresite')
+src <- conan::conan_sources("github::mrc-ide/malariasimulation", repos = "https://mrc-ide.github.io/drat/")
+
+ctx <- context::context_save(
+  'pkgs',
+  packages = packages,
+  package_sources = src,
+  sources = 'functions/parameterizing_functions.R'
+)
+
+config <- didehpc::didehpc_config(
+  use_rrq = TRUE,
+  cores = 1,
+  cluster = "fi--didemrchnb" , 
+  template = "GeneralNodes",
+  shares = didehpc::path_mapping('nas2', #
+                                 path_local = 'M:/', 
+                                 path_remote = '\\\\fi--didenas1.dide.ic.ac.uk', 
+                                 drive_remote = 'M:')
+)
+
+# load context into queue
+obj <- didehpc::queue_didehpc(ctx, config)
+
+jobs<- obj$lapply(filepaths, run_malaria_model)
+
   prep_country(iso,
                scenario= 'intervention', 
                vimc_mortality= TRUE,
